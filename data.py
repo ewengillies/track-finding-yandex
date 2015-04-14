@@ -28,6 +28,10 @@ class Dataset:
 
         self.lookup_table = self._prepare_wires_lookup()
 
+    @property
+    def n_events(self):
+        return len(self.hits_data)
+
     def _prepare_wires_lookup(self):
         """
         Preparing lookup table [layer_id, cell_id] -> wire_id
