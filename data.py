@@ -10,6 +10,7 @@ Notation used below:
  - cell_id is the index of wire in the layer (from 0 to layer_size -1)
 """
 
+
 class Dataset:
     def __init__(self, path="data/signal_TDR.root", treename='tree'):
         """
@@ -23,8 +24,8 @@ class Dataset:
         """
         self.hits_data = root2array(path, treename=treename)
         # Hardcode information about wires in the CDC
-        self.n_wires_in_layers = [198,198,204,210,216,222,228,234,240,246,
-                                  252,258,264,270,276,282,288,294,300,306]
+        self.n_wires_in_layers = [198, 198, 204, 210, 216, 222, 228, 234, 240, 246,
+                                  252, 258, 264, 270, 276, 282, 288, 294, 300, 306]
         self.r_layers = [51.4, 53, 54.6, 56.2, 57.8, 59.4, 61, 62.6, 64.2, 65.8,
                          67.4, 69, 70.6, 72.2, 73.8, 75.4, 77, 78.6, 80.2, 81.8]
         self.start_phi_layer = [0.00000, 0.015867, 0.015400, 0.000000, 0.014544,
@@ -49,7 +50,7 @@ class Dataset:
         First 198 and last 306 wires not used currently
         :return:
         """
-        lookup = np.zeros([len(self.n_wires_in_layers),max(self.n_wires_in_layers)], dtype='int')
+        lookup = np.zeros([len(self.n_wires_in_layers), max(self.n_wires_in_layers)], dtype='int')
         lookup[:, :] = - 1
         wire_id = 0
         for layer_id, layer_size in enumerate(self.n_wires_in_layers):
@@ -61,13 +62,13 @@ class Dataset:
 
     def _prepare_wire_radius_lookup(self):
         """
-        Prepares lookup table to map from wire id to  the radial position
+        Prepares lookup table to map from wire id to the radial position
         :return: numpy.array of shape [total_wires]
         """
         first_wire = 0
         radii = np.zeros(self.total_wires, dtype=float)
         for layer_id, layer_size in enumerate(self.n_wires_in_layers):
-            radii[first_wire:first_wire+layer_size] = self.r_layers[layer_id]
+            radii[first_wire:first_wire + layer_size] = self.r_layers[layer_id]
             first_wire += layer_size
         return radii
 
@@ -80,7 +81,7 @@ class Dataset:
         first_wire = 0
         for layer_id, layer_size in enumerate(self.n_wires_in_layers):
             for wire_index in range(layer_size):
-                angles[first_wire+wire_index] = self.start_phi_layer[layer_id] + 2*math.pi/layer_size*wire_index
+                angles[first_wire + wire_index] = self.start_phi_layer[layer_id] + 2 * math.pi / layer_size * wire_index
             first_wire += layer_size
         return angles
 
@@ -129,9 +130,9 @@ class Dataset:
         coding = [1, 2, 2, 2]
         # Maps signal to 1, background to 2, and nothing to 0
         measurement = np.take(coding, measurement)
-        result = np.zeros(self.total_wires, dtype=float)
+        result = np.zeros(self.total_wires, dtype=int)
         result[wire_ids] += measurement
-        return result
+        return result.astype(int)
 
     def get_neighbours(self):
         """
@@ -143,9 +144,30 @@ class Dataset:
         for layer_id, layer_size in enumerate(self.n_wires_in_layers[:18]):
             for wire_index in range(layer_size):
                 this_wire = wire_index + first_wire
-                neighbours[this_wire,this_wire+(wire_index+1)%layer_size] = 1 # Clockwise
-                neighbours[this_wire,this_wire+(wire_index-1)%layer_size] = 1 # Anti-Clockwise
-                above = np.where((abs(self.angles_table-self.angles_table[this_wire]) < 0.115) & (self.radii_table == self.r_layers[layer_id+2]))
-                neighbours[this_wire,above[0]] = 1
+                neighbours[this_wire, this_wire + (wire_index + 1) % layer_size] = 1  # Clockwise
+                neighbours[this_wire, this_wire + (wire_index - 1) % layer_size] = 1  # Anti-Clockwise
+                above = np.where((abs(self.angles_table - self.angles_table[this_wire]) < 0.005) & (
+                    self.radii_table == self.r_layers[layer_id + 1]))
+                neighbours[this_wire, above[:]] = 1
             first_wire += layer_size
         return neighbours
+
+    def get_wires_rhos_and_phis(self):
+        """ Returns the positions of each wire in radial system
+
+        :return: pair of numpy.arrays of shape [n_wires],
+         - first one contains rho`s (radii)
+         - second one contains phi's (angles)
+        """
+        return self.radii_table, self.angles_table
+
+    def get_wires_xs_and_ys(self):
+        """ Returns the positions of each wire in cartesian system
+
+        :return: pair of numpy.arrays of shape [n_wires],
+         - first one contains x`s
+         - second one contains y's
+        """
+        x = self.radii_table * np.cos(self.angles_table)
+        y = self.radii_table * np.sin(self.angles_table)
+        return x, y
