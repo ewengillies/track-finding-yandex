@@ -145,7 +145,7 @@ class Dataset:
                 this_wire = wire_index + first_wire
                 neighbours[this_wire,this_wire+(wire_index+1)%layer_size] = 1 # Clockwise
                 neighbours[this_wire,this_wire+(wire_index-1)%layer_size] = 1 # Anti-Clockwise
-                above = np.where((abs(self.angles_table-self.angles_table[this_wire]) < 0.005) & (self.radii_table == self.r_layers[layer_id+1]))
-                neighbours[this_wire,above[:]] = 1
+                above = np.where((abs(self.angles_table-self.angles_table[this_wire]) < 0.115) & (self.radii_table == self.r_layers[layer_id+2]))
+                neighbours[this_wire,above[0]] = 1
             first_wire += layer_size
         return neighbours
