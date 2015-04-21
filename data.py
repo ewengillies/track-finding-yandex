@@ -26,15 +26,15 @@ class Dataset:
         # Hardcode information about wires in the CDC
         self.n_wires_in_layers = [198, 198, 204, 210, 216, 222, 228, 234, 240, 246,
                                   252, 258, 264, 270, 276, 282, 288, 294, 300, 306]
+        self.total_wires = 4986
+        assert sum(self.n_wires_in_layers) == self.total_wires
         self.r_layers = [51.4, 53, 54.6, 56.2, 57.8, 59.4, 61, 62.6, 64.2, 65.8,
                          67.4, 69, 70.6, 72.2, 73.8, 75.4, 77, 78.6, 80.2, 81.8]
         self.start_phi_layer = [0.00000, 0.015867, 0.015400, 0.000000, 0.014544,
                                 0.00000, 0.000000, 0.013426, 0.000000, 0.012771,
                                 0.00000, 0.012177, 0.000000, 0.011636, 0.000000,
                                 0.00000, 0.000000, 0.010686, 0.000000, 0.010267]
-
-        self.total_wires = 4986
-        assert sum(self.n_wires_in_layers) == self.total_wires
+        self.d_phi_layer = self._calculated_d_phi()
         self.lookup_table = self._prepare_wires_lookup()
         self.radii_table = self._prepare_wire_radius_lookup()
         self.angles_table = self._prepare_wire_angles_lookup()
@@ -81,8 +81,10 @@ class Dataset:
         first_wire = 0
         for layer_id, layer_size in enumerate(self.n_wires_in_layers):
             for wire_index in range(layer_size):
-                angles[first_wire + wire_index] = self.start_phi_layer[layer_id] + 2 * math.pi / layer_size * wire_index
+                angles[first_wire + wire_index] = (self.start_phi_layer[layer_id] 
+                    + self.d_phi_layer[layer_id] * wire_index)
             first_wire += layer_size
+        angles %= 2*math.pi
         return angles
 
     def _get_wire_ids(self, event_id):
@@ -98,6 +100,13 @@ class Dataset:
         assert np.all(wire_ids >= 0), \
             'Wrong id of wire here {} {}'.format(layer_ids[wire_ids < 0], cell_ids[wire_ids < 0])
         return wire_ids
+
+    def _calculated_d_phi(self):
+        """
+        Returns the phi separation of the wires as defined by the number of
+        wires in the layer
+        """
+        return 2*math.pi/np.asarray(self.n_wires_in_layers)
 
     def get_measurement(self, event_id, name):
         """
@@ -141,14 +150,30 @@ class Dataset:
         """
         neighbours = lil_matrix((self.total_wires, self.total_wires))
         first_wire = 0
-        for layer_id, layer_size in enumerate(self.n_wires_in_layers[:18]):
+        for layer_id, layer_size in enumerate(self.n_wires_in_layers):
             for wire_index in range(layer_size):
                 this_wire = wire_index + first_wire
-                neighbours[this_wire, this_wire + (wire_index + 1) % layer_size] = 1  # Clockwise
-                neighbours[this_wire, this_wire + (wire_index - 1) % layer_size] = 1  # Anti-Clockwise
-                above = np.where((abs(self.angles_table - self.angles_table[this_wire]) < 0.005) & (
-                    self.radii_table == self.r_layers[layer_id + 1]))
-                neighbours[this_wire, above[:]] = 1
+                next_wire = first_wire + (wire_index + 1)%layer_size
+                neighbours[next_wire, this_wire] = 1  # Clockwise
+                neighbours[this_wire, next_wire] = 1  # Anti-Clockwise
+                if (layer_id != len(self.n_wires_in_layers) - 1) :
+                    wire_a = self.angles_table[this_wire]
+                    angle_win = self.d_phi_layer[layer_id + 1] * 1.5
+                    above = np.where(
+                         (self.radii_table == self.r_layers[layer_id + 1]) &
+                         ((abs(wire_a - self.angles_table) < angle_win) |
+                         (2*math.pi - abs(wire_a - self.angles_table) < angle_win)
+                         ))[0]
+                    neighbours[this_wire, above[:]] = 1 # Above
+                if (layer_id != 0):
+                    wire_a = self.angles_table[this_wire]
+                    angle_win = self.d_phi_layer[layer_id - 1] * 1.5
+                    below = np.where(
+                         (self.radii_table == self.r_layers[layer_id - 1]) &
+                         ((abs(wire_a - self.angles_table) < angle_win) |
+                         (2*math.pi - abs(wire_a - self.angles_table) < angle_win)
+                         ))[0]
+                    neighbours[this_wire, below[:]] = 1 # Below
             first_wire += layer_size
         return neighbours
 
