@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.stats import norm
 from root_numpy import root2array
 import math
 from scipy.sparse import *
@@ -40,18 +41,29 @@ class Dataset:
                                 0.00000, 0.000000, 0.000000, 0.000000, 0.000000,
                                 0.00000, 0.000000, 0.000000, 0.000000, 0.000000]
         self.signal_r = 30. # determined from truth distribution of radial
-                              # coordinates of hits 
+                            # coordinates of hits
+        self.signal_r_sigma = 2 # defines the spread of the smearing of the
+                                # signal track from the constant value
         self.target_r = 20. # defined to cover the entire sense volume
- 
+        self.track_smear = 5   # defines the number of cells the track
+                               # correspondence function will use when
+                               # calculating probabilites
+        self.n_track_phi_bins = 200
+        self.d_arc_track_bins = 0.5
+        self.n_track_rho_bins = 50
+        self.n_track_bins = self.n_track_phi_bins*self.n_track_rho_bins
+
         self.d_phi_layer = self._calculated_d_phi()
         self.lookup_table = self._prepare_wires_lookup()
         self.radii_table = self._prepare_wire_radius_lookup()
         self.angles_table = self._prepare_wire_angles_lookup()
         self.neighbours_table = self.get_neighbours()
-        self.track_phis = self.get_track_phis()
-        self.track_rhos = self.get_track_rhos()
+
         self.track_table = self._prepare_track_lookup()
- 
+        self.track_phis = self._prepare_track_phis()
+        self.track_rhos = self._prepare_track_rhos()
+        self.correspondence = self._prepare_wire_track_correspondence()
+
     @property
     def n_events(self):
         return len(self.hits_data)
@@ -99,7 +111,7 @@ class Dataset:
         first_wire = 0
         for layer_id, layer_size in enumerate(self.n_wires_in_layers):
             for wire_index in range(layer_size):
-                angles[first_wire + wire_index] = (self.start_phi_layer[layer_id] 
+                angles[first_wire + wire_index] = (self.start_phi_layer[layer_id]
                     + self.d_phi_layer[layer_id] * wire_index)
             first_wire += layer_size
         angles %= 2*math.pi
@@ -197,7 +209,7 @@ class Dataset:
         return neighbours
 
     def get_wires_rhos_and_phis(self):
-        """ 
+        """
         Returns the positions of each wire in radial system
 
         :return: pair of numpy.arrays of shape [n_wires],
@@ -218,60 +230,108 @@ class Dataset:
         y = self.radii_table * np.sin(self.angles_table)
         return x, y
 
-    def get_track_phis(self):
-        """
-        Discretizes the possible locations of the center of a track in phi
-
-        :return: numpy.array of shape [n_track_phi_bins], contains possible
-        centers of the tracks in phi
-        """
-        n_bins = self.n_wires_in_layers[-2]  # match binning in phi
-        dphi = self.d_phi_layer[-2] # use binning of largest sense layer
-        return np.fromfunction(lambda x: x*dphi, (n_bins,))
-
-    def get_track_rhos(self):
-        """
-        Discretizes the possible locations of the center of a track in rho
-
-        :return: numpy.array of shape [n_track_rho_bins], contains possible
-        centers of the tracks in rho
-        """
-        n_bins = 300 # match binning in phi
-        drho = 2*self.target_r/n_bins
-        r_0 = self.signal_r - self.target_r 
-        return np.fromfunction(lambda x: r_0 + x*drho, (n_bins,)) 
-
     def _prepare_track_lookup(self):
         """
         Prepares lookup table to map from [rho_bin, phi_bin] -> bin_id
         :return: numpy.array of shape [n_track_bins]
         """
-        track_lookup = np.zeros([len(self.track_rhos), len(self.track_phis)], dtype='int')
+        track_lookup = np.zeros([self.n_track_rho_bins,
+                                 self.n_track_phi_bins], dtype='int')
         track_lookup[:, :] = - 1
         track_bin = 0
-        for rho_bin in self.track_rhos:
-            for phi_bin in self.track_phis:
+        for rho_bin in range(self.n_track_rho_bins):
+            for phi_bin in range(self.n_track_phi_bins):
                 track_lookup[rho_bin, phi_bin] = track_bin
                 track_bin += 1
-        assert track_bin == len(self.track_rhos)*len(self.track_phis)
+        assert track_bin == self.n_track_rho_bins*self.n_track_phi_bins
         return track_lookup
 
-    def get_wire_track_correspondence(self):
+    def _prepare_track_rhos(self):
         """
-        Defines the probability that a given wire belongs to a track centered at 
+        Returns the physical locations of each track_bin in rho.  
+        
+        Maximal distance is defined as the location where the signal track will
+        enter the last layer.  
+
+        Minimal distance defined as the distance where the track+track_smear  
+        will enter the first layer, provided this distance is not less than the
+        physics allows (i.e. track must pass through both target and detector
+        region)
+
+        :return: numpy.array of shape [n_track_bins]
+        """
+        t_0 = 0
+        track_rhos = np.zeros(self.n_track_bins)
+        r_max = self.r_layers[-2] - self.signal_r
+        r_min = max(self.signal_r - self.target_r, 
+                    self.r_layers[1] - self.signal_r - self.track_smear)
+        drho = (r_max - r_min)/(self.n_track_rho_bins-1)
+        for n in range(self.n_track_rho_bins):
+            track_rhos[t_0:t_0 + self.n_track_phi_bins] = r_min + drho*n 
+            t_0 += self.n_track_phi_bins
+        return track_rhos
+
+     def _prepare_track_phis(self):
+        """
+        Discretizes the possible locations of the center of a track in phi
+
+        :return: numpy.array of shape [n_track_bins], contains possible
+        centers of the tracks in phi
+        """
+        dphi = (2*math.pi)/self.n_track_phi_bins
+        return np.fromfunction(lambda x:(x%self.n_track_phi_bins)*dphi,
+                              (self.n_track_bins,))
+
+    def get_tracks_rhos_and_phis(self):
+        """
+        Returns the positions of each track center 
+
+        :return: pair of numpy.arrays of shape [n_track_bins],
+         - first one contains rho`s (radii)
+         - second one contains phi's (angles)
+        """
+        return self.track_rhos, self.track_phis
+
+    def polar_dist(self,rho_1,phi_1,rho_2,phi_2):
+        """
+        Returns Euclidian distance between to points in polar coordinates
+        """
+        return np.sqrt(rho_1**2 + rho_2**2 - 2*rho_1*rho_2*np.cos(phi_1-phi_2))
+
+    def dist_prob(self, distance):
+        """
+        Returns probability that hit on wire belongs to given track bin
+        """
+        return norm.pdf(distance, scale=self.signal_r_sigma)
+
+    def trk_wire_dist(self, wr_id, t_bin):
+        """
+        Returns distance between a wire given by wr_id and the center of a
+        potential track given by t_bin
+        """
+        return self.polar_dist(self.radii_table[wr_id],self.angles_table[wr_id],
+                               self.track_rhos[t_bin], self.track_phis[t_bin])
+
+    def trk_wire_prob(self, wr_id, t_bin):
+        """
+        Returns probability that hit on wire belongs to given track bin
+        """
+        return norm.pdf(self.trk_wire_dist(wr_id, t_bin) - self.signal_r,
+                        scale=self.signal_r_sigma)
+
+    def _prepare_wire_track_correspondence(self):
+        """
+        Defines the probability that a given wire belongs to a track centered at
         a given track center bin
         :returns: scipy.sparse matrix of shape [n_wires, n_track_bin]
         """
-        
-
-
-
-
-
-
-
-
-
+        corresp = lil_matrix((self.total_wires,self.n_track_bins))
+        for trk_bin in range(self.n_track_bins):
+            for wire_id in range(self.total_wires):
+                this_dist = self.trk_wire_dist(wire_id,trk_bin) - self.signal_r
+                if abs(this_dist) < self.track_smear:
+                    corresp[wire_id,trk_bin] = self.dist_prob(this_dist)
+        return corresp
 
 
 
@@ -357,7 +417,7 @@ class Dataset_SimChen:
         first_wire = 0
         for layer_id, layer_size in enumerate(self.n_wires_in_layers):
             for wire_index in range(layer_size):
-                angles[first_wire + wire_index] = (self.start_phi_layer[layer_id] 
+                angles[first_wire + wire_index] = (self.start_phi_layer[layer_id]
                     + self.d_phi_layer[layer_id] * wire_index)
             first_wire += layer_size
         angles %= 2*math.pi
