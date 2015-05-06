@@ -3,6 +3,7 @@ from scipy.stats import norm
 from root_numpy import root2array
 import math
 from scipy.sparse import lil_matrix
+from scipy.spatial.distance import pdist, squareform
 
 """
 Notation used below:
@@ -16,6 +17,7 @@ class Dataset:
     # pylint: disable=too-many-instance-attributes
     # pylint: disable=old-style-class
     # pylint: disable=bad-continuation
+    # pylint: disable=wildcard-import
     def __init__(self, path="data/signal_TDR.root", treename='tree'):
         """
         Dataset provides an interface to work with MC stored in root format.
@@ -28,20 +30,19 @@ class Dataset:
         """
         self.hits_data = root2array(path, treename=treename)
         # Hardcode information about wires in the CDC
-        self.wires_by_layer = [198, 198, 204, 210, 216, 222, 228, 234, 240, 246,
-                               252, 258, 264, 270, 276, 282, 288, 294, 300, 306]
-        self.r_layers = [51.4, 53, 54.6, 56.2, 57.8, 59.4, 61, 62.6, 64.2, 65.8,
-                         67.4, 69, 70.6, 72.2, 73.8, 75.4, 77, 78.6, 80.2, 81.8]
+        self.wires_by_layer = [198, 204, 210, 216, 222, 228, 234, 240, 246,
+                               252, 258, 264, 270, 276, 282, 288, 294, 300]
+        self.r_layers = [53, 54.6, 56.2, 57.8, 59.4, 61, 62.6, 64.2, 65.8,
+                         67.4, 69, 70.6, 72.2, 73.8, 75.4, 77, 78.6, 80.2]
 #        self.phi0_by_layer = [0.00000, 0.015867, 0.015400, 0.000000, 0.014544,
 #                              0.00000, 0.000000, 0.013426, 0.000000, 0.012771,
 #                              0.00000, 0.012177, 0.000000, 0.011636, 0.000000,
 #                              0.00000, 0.000000, 0.010686, 0.000000, 0.010267]
-        self.phi0_by_layer = [0.00000, 0.015867, 0.000000, 0.000000, 0.000000,
-                              0.00000, 0.014960, 0.014960, 0.000000, 0.000000,
-                              0.00000, 0.000000, 0.000000, 0.000000, 0.000000,
-                              0.00000, 0.000000, 0.000000, 0.000000, 0.000000]
+        self.phi0_by_layer = [0.015867, 0.0, 0.0, 0.0, 0.0, 0.014960,
+                              0.014960, 0.0, 0.0, 0.0, 0.0, 0.000000,
+                              0.000000, 0.0, 0.0, 0.0, 0.0, 0.000000]
         self.first_wire = self._get_first_wire()
-        self.total_wires = 4986
+        self.total_wires = 4482
         assert sum(self.wires_by_layer) == self.total_wires
 
         self.sig_rho = 30. # determined from truth distribution of radial
@@ -60,6 +61,8 @@ class Dataset:
         self.wire_lookup = self._prepare_wires_lookup()
         self.wire_rhos = self._prepare_wire_rho()
         self.wire_phis = self._prepare_wire_phi()
+        self.wire_x, self.wire_y = self._prepare_wire_cartisian()
+        self.wire_dists = self._prepare_wire_distances()
         self.wire_neighbours = self._prepare_wire_neighbours()
 
         self.track_lookup = self._prepare_track_lookup()
@@ -122,39 +125,74 @@ class Dataset:
         angles %= 2*math.pi
         return angles
 
+    def _prepare_wire_cartisian(self):
+        """
+        Returns the positions of each wire in cartesian system
+
+        :return: pair of numpy.arrays of shape [n_wires],
+         - first one contains x`s
+         - second one contains y's
+        """
+        x_coor = self.wire_rhos * np.cos(self.wire_phis)
+        y_coor = self.wire_rhos * np.sin(self.wire_phis)
+        return x_coor, y_coor
+
+    def _prepare_wire_distances(self):
+        """
+        Returns a numpy array of distances between wires
+        :return: numpy array of shape [n_wires,n_wires]
+        """
+        wire_xy = np.column_stack((self.wire_x, self.wire_y))
+        distances = pdist(wire_xy)
+        return squareform(distances)
+
     def _prepare_wire_neighbours(self):
         """
-        Returns a sparse array of neighbour relations
-        :return: scipy.sparse of shape [total_wires,total_wires]
+        Returns a sparse array of neighbour relations, where slicing should be
+        done in the row index, i.e. find(neighbours[wire_0,:]) will return the
+        neighbours of wire_0
+
+        :return: scipy.sparse Compressed Sparse Row of shape
+        [total_wires,total_wires]
         """
-        neighbours = lil_matrix((self.total_wires, self.total_wires))
-        first_wire = 0
-        for lay, layer_size in enumerate(self.wires_by_layer):
-            for wire_index in range(layer_size):
-                this_wire = wire_index + first_wire
-                next_wire = first_wire + (wire_index + 1)%layer_size
-                neighbours[next_wire, this_wire] = 1  # Clockwise
-                neighbours[this_wire, next_wire] = 1  # Anti-Clockwise
-                if lay != len(self.wires_by_layer) - 1:
-                    wire_a = self.wire_phis[this_wire]
-                    angle_win = self.dphi_by_layer[lay + 1] * 1.5
-                    above = np.where(
-                         (self.wire_rhos == self.r_layers[lay + 1]) &
-                         ((abs(wire_a - self.wire_phis) < angle_win) |
-                         (2*math.pi - abs(wire_a - self.wire_phis) < angle_win)
-                         ))[0]
-                    neighbours[this_wire, above[:]] = 1 # Above
-                if lay != 0:
-                    wire_a = self.wire_phis[this_wire]
-                    angle_win = self.dphi_by_layer[lay - 1] * 1.5
-                    below = np.where(
-                         (self.wire_rhos == self.r_layers[lay - 1]) &
-                         ((abs(wire_a - self.wire_phis) < angle_win) |
-                         (2*math.pi - abs(wire_a - self.wire_phis) < angle_win)
-                         ))[0]
-                    neighbours[this_wire, below[:]] = 1 # Below
-            first_wire += layer_size
-        return neighbours
+        neigh = lil_matrix((self.total_wires, self.total_wires))
+        for lay, n_wires in enumerate(self.wires_by_layer):
+            # Define adjacent layers
+            if lay == 0:
+                adjacent_layers = [lay+1]
+            elif lay == len(self.wires_by_layer) - 1:
+                adjacent_layers = [lay-1]
+            else:
+                adjacent_layers = [lay-1, lay+1]
+            # Loop over wires in current layer
+            for wire_index in range(n_wires):
+                wire = wire_index +  self.first_wire[lay]
+                nxt_wire = (wire_index + 1)%n_wires + self.first_wire[lay]
+                # Define neighbour relations on current layer
+                neigh[nxt_wire, wire] = 1  # Clockwise
+                neigh[wire, nxt_wire] = 1  # Anti-Clockwise
+                # Define neighbour relations for adjacent layers
+                rel_pos = self.wire_phis[wire]/(2*math.pi)
+                for a_lay in adjacent_layers:
+                    # Set constants of adjacent layer
+                    a_n_wires = self.wires_by_layer[a_lay]
+                    a_first = self.first_wire[a_lay]
+                    # Find adjacent wire closest in phi to current wire
+                    a_wire = rel_pos - (self.phi0_by_layer[a_lay]/(2*math.pi))
+                    a_wire *= a_n_wires
+                    a_wire = round(a_wire)
+                    a_wire %= a_n_wires
+                    # Find wires next to the closest adjacent wire
+                    nxt_a_wire = (a_wire+1)%a_n_wires
+                    prv_a_wire = (a_wire-1)%a_n_wires
+                    a_wire += a_first
+                    nxt_a_wire += a_first
+                    prv_a_wire += a_first
+                    # Define neighbour relations for wires in adjacent layers
+                    neigh[wire, a_wire] = 1      # Above/Below
+                    neigh[wire, nxt_a_wire] = 1  # Above/Below Clockwise
+                    neigh[wire, prv_a_wire] = 1  # Above/Below Anti-Clockwise
+        return neigh.tocsr()
 
     def _get_wire_ids(self, event_id):
         """
@@ -162,9 +200,7 @@ class Dataset:
         """
         event = self.hits_data[event_id]
         cell_ids = event["CdcCell_cellID"]
-        # + 1 since first is insensetive, i.e. layer 0 in root file is layer 1
-        # in this structure
-        layer_ids = event["CdcCell_layerID"] + 1
+        layer_ids = event["CdcCell_layerID"]
         wire_ids = self.wire_lookup[layer_ids, cell_ids]
         assert np.all(wire_ids >= 0), \
             'Wrong id of wire here {} {}'.format(layer_ids[wire_ids < 0],
@@ -223,18 +259,6 @@ class Dataset:
          - second one contains phi's (angles)
         """
         return self.wire_rhos, self.wire_phis
-
-    def get_wires_xs_and_ys(self):
-        """
-        Returns the positions of each wire in cartesian system
-
-        :return: pair of numpy.arrays of shape [n_wires],
-         - first one contains x`s
-         - second one contains y's
-        """
-        x_coor = self.wire_rhos * np.cos(self.wire_phis)
-        y_coor = self.wire_rhos * np.sin(self.wire_phis)
-        return x_coor, y_coor
 
     def _prepare_track_lookup(self):
         """
