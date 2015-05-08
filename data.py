@@ -13,12 +13,11 @@ Notation used below:
 """
 
 
-class Dataset:
+class Dataset(object):
     # pylint: disable=too-many-instance-attributes
-    # pylint: disable=old-style-class
     # pylint: disable=bad-continuation
-    # pylint: disable=wildcard-import
-    def __init__(self, path="data/signal_TDR.root", treename='tree'):
+    def __init__(self, path="data/signal_TDR.root", treename='tree',
+                 trk_phi_bins=40, trk_rho_bins=10, sig_rho_sigma=2.):
         """
         Dataset provides an interface to work with MC stored in root format.
         Results of methods are either numpy.arrays or scipy.sparse objects.
@@ -27,17 +26,20 @@ class Dataset:
 
         :param path: path to rootfile
         :param treename: name of the tree in root dataset
+        :param sig_rho_sigma: float, defines the spread of the smearing of the
+            signal track from the constant value
+
         """
         self.hits_data = root2array(path, treename=treename)
-# Hardcode information about wires in the CDC
+        # Hardcoded information about wires in the CDC
         self.wires_by_layer = [198, 204, 210, 216, 222, 228, 234, 240, 246,
                                252, 258, 264, 270, 276, 282, 288, 294, 300]
         self.r_layers = [53, 54.6, 56.2, 57.8, 59.4, 61, 62.6, 64.2, 65.8,
                          67.4, 69, 70.6, 72.2, 73.8, 75.4, 77, 78.6, 80.2]
-#        self.phi0_by_layer = [0.00000, 0.015867, 0.015400, 0.000000, 0.014544,
-#                              0.00000, 0.000000, 0.013426, 0.000000, 0.012771,
-#                              0.00000, 0.012177, 0.000000, 0.011636, 0.000000,
-#                              0.00000, 0.000000, 0.010686, 0.000000, 0.010267]
+        # self.phi0_by_layer = [0.00000, 0.015867, 0.015400, 0.000000, 0.014544,
+        #                              0.00000, 0.000000, 0.013426, 0.000000, 0.012771,
+        #                              0.00000, 0.012177, 0.000000, 0.011636, 0.000000,
+        #                              0.00000, 0.000000, 0.010686, 0.000000, 0.010267]
         self.phi0_by_layer = [0.015867, 0.0, 0.0, 0.0, 0.0, 0.014960,
                               0.014960, 0.0, 0.0, 0.0, 0.0, 0.000000,
                               0.000000, 0.0, 0.0, 0.0, 0.0, 0.000000]
@@ -45,7 +47,7 @@ class Dataset:
         self.total_wires = 4482
         assert sum(self.wires_by_layer) == self.total_wires
 
-        self.dphi_by_layer = self._calculated_d_phi()
+        self.dphi_by_layer = self._calculate_d_phi()
         self.wire_lookup = self._prepare_wires_lookup()
         self.wire_rhos = self._prepare_wire_rho()
         self.wire_phis = self._prepare_wire_phi()
@@ -53,23 +55,25 @@ class Dataset:
         self.wire_dists = self._prepare_wire_distances()
         self.wire_neighbours = self._prepare_wire_neighbours()
 
-# Set track fitting parameters
-        self.sig_rho = 30. # determined from truth distribution of radial
-                            # coordinates of hits
-        self.sig_rho_sigma = 2 # defines the spread of the smearing of the
-                                # signal track from the constant value
-        self.trgt_rho = 20. # defined to cover the entire sense volume
-        self.sig_trk_smear = 5   # defines the number of cells the track
-                               # correspondence function will use when
-                               # calculating probabilites
-        self.trk_phi_bins = 40
-        self.trk_rho_bins = 10
-        self.trk_bins = self.trk_phi_bins*self.trk_rho_bins
+        # Set track fitting parameters
+
+        # Determined from truth distribution of radial
+        # coordinates of hits
+        self.sig_rho = 30.
+        self.sig_rho_sigma = sig_rho_sigma
+        self.trgt_rho = 20.  # defined to cover the entire sense volume
+        # Defines the number of cells the track
+        # correspondence function will use when
+        # calculating probabilities
+        self.sig_trk_smear = 5
+        self.trk_phi_bins = trk_phi_bins
+        self.trk_rho_bins = trk_rho_bins
+        self.trk_bins = self.trk_phi_bins * self.trk_rho_bins
 
         self.track_lookup = self._prepare_track_lookup()
         self.track_phis = self._prepare_track_phis()
         self.track_rhos = self._prepare_track_rhos()
-        self.track_x, self.track_y = self._prepare_track_cartisian()
+        self.track_x, self.track_y = self._prepare_track_cartesian()
         self.track_wire_dists = self._prepare_track_distances()
         self.correspondence = self._prepare_wire_track_corresp()
 
@@ -125,7 +129,7 @@ class Dataset:
             for wire in range(layer_size):
                 angles[wire_0[lay] + wire] = (self.phi0_by_layer[lay]
                                               + self.dphi_by_layer[lay] * wire)
-        angles %= 2*math.pi
+        angles %= 2 * math.pi
         return angles
 
     def _prepare_wire_cartisian(self):
@@ -162,37 +166,37 @@ class Dataset:
         for lay, n_wires in enumerate(self.wires_by_layer):
             # Define adjacent layers
             if lay == 0:
-                adjacent_layers = [lay+1]
+                adjacent_layers = [lay + 1]
             elif lay == len(self.wires_by_layer) - 1:
-                adjacent_layers = [lay-1]
+                adjacent_layers = [lay - 1]
             else:
-                adjacent_layers = [lay-1, lay+1]
+                adjacent_layers = [lay - 1, lay + 1]
             # Loop over wires in current layer
             for wire_index in range(n_wires):
-                wire = wire_index +  self.first_wire[lay]
-                nxt_wire = (wire_index + 1)%n_wires + self.first_wire[lay]
+                wire = wire_index + self.first_wire[lay]
+                nxt_wire = (wire_index + 1) % n_wires + self.first_wire[lay]
                 # Define neighbour relations on current layer
                 neigh[nxt_wire, wire] = 1  # Clockwise
                 neigh[wire, nxt_wire] = 1  # Anti-Clockwise
                 # Define neighbour relations for adjacent layers
-                rel_pos = self.wire_phis[wire]/(2*math.pi)
+                rel_pos = self.wire_phis[wire] / (2 * math.pi)
                 for a_lay in adjacent_layers:
                     # Set constants of adjacent layer
                     a_n_wires = self.wires_by_layer[a_lay]
                     a_first = self.first_wire[a_lay]
                     # Find adjacent wire closest in phi to current wire
-                    a_wire = rel_pos - (self.phi0_by_layer[a_lay]/(2*math.pi))
+                    a_wire = rel_pos - (self.phi0_by_layer[a_lay] / (2 * math.pi))
                     a_wire *= a_n_wires
                     a_wire = round(a_wire)
                     a_wire %= a_n_wires
                     # Find wires next to the closest adjacent wire
-                    nxt_a_wire = (a_wire+1)%a_n_wires
-                    prv_a_wire = (a_wire-1)%a_n_wires
+                    nxt_a_wire = (a_wire + 1) % a_n_wires
+                    prv_a_wire = (a_wire - 1) % a_n_wires
                     a_wire += a_first
                     nxt_a_wire += a_first
                     prv_a_wire += a_first
                     # Define neighbour relations for wires in adjacent layers
-                    neigh[wire, a_wire] = 1      # Above/Below
+                    neigh[wire, a_wire] = 1  # Above/Below
                     neigh[wire, nxt_a_wire] = 1  # Above/Below Clockwise
                     neigh[wire, prv_a_wire] = 1  # Above/Below Anti-Clockwise
         return neigh.tocsr()
@@ -210,12 +214,12 @@ class Dataset:
                                                  cell_ids[wire_ids < 0])
         return wire_ids
 
-    def _calculated_d_phi(self):
+    def _calculate_d_phi(self):
         """
         Returns the phi separation of the wires as defined by the number of
         wires in the layer
         """
-        return 2*math.pi/np.asarray(self.wires_by_layer)
+        return 2 * math.pi / np.asarray(self.wires_by_layer)
 
     def get_measurement(self, event_id, name):
         """
@@ -276,7 +280,7 @@ class Dataset:
             for phi_bin in range(self.trk_phi_bins):
                 track_lookup[rho_bin, phi_bin] = track_bin
                 track_bin += 1
-        assert track_bin == self.trk_rho_bins*self.trk_phi_bins
+        assert track_bin == self.trk_rho_bins * self.trk_phi_bins
         return track_lookup
 
     def _prepare_track_rhos(self):
@@ -298,9 +302,9 @@ class Dataset:
         r_max = self.r_layers[-2] - self.sig_rho
         r_min = max(self.sig_rho - self.trgt_rho,
                     self.r_layers[1] - self.sig_rho - self.sig_trk_smear)
-        drho = (r_max - r_min)/(self.trk_rho_bins-1)
+        drho = (r_max - r_min) / (self.trk_rho_bins - 1)
         for n_bin in range(self.trk_rho_bins):
-            track_rhos[t_0:t_0 + self.trk_phi_bins] = r_min + drho*n_bin
+            track_rhos[t_0:t_0 + self.trk_phi_bins] = r_min + drho * n_bin
             t_0 += self.trk_phi_bins
         return track_rhos
 
@@ -311,11 +315,11 @@ class Dataset:
         :return: numpy.array of shape [trk_bins], contains possible
         centers of the tracks in phi
         """
-        dphi = (2*math.pi)/self.trk_phi_bins
-        return np.fromfunction(lambda x: (x%self.trk_phi_bins)*dphi,
+        dphi = (2 * math.pi) / self.trk_phi_bins
+        return np.fromfunction(lambda x: (x % self.trk_phi_bins) * dphi,
                                (self.trk_bins,))
 
-    def _prepare_track_cartisian(self):
+    def _prepare_track_cartesian(self):
         """
         Returns the positions of each wire in cartesian system
 
@@ -359,10 +363,7 @@ class Dataset:
         a given track center bin
         :returns: scipy.sparse matrix of shape [n_wires, n_track_bin]
         """
-        corresp = lil_matrix((self.total_wires, self.trk_bins))
-        for trck in range(self.trk_bins):
-            for wire in range(self.total_wires):
-                this_dist = self.track_wire_dists[wire, trck] - self.sig_rho
-                if abs(this_dist) < self.sig_trk_smear:
-                    corresp[wire, trck] = self.dist_prob(this_dist)
-        return corresp
+        distances = np.abs(self.track_wire_dists - self.sig_rho)
+        corresp = np.where(distances < self.sig_trk_smear, self.dist_prob(distances), 0)
+        return lil_matrix(corresp)
+
