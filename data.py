@@ -3,7 +3,7 @@ from scipy.stats import norm
 from root_numpy import root2array
 import math
 from scipy.sparse import lil_matrix
-from scipy.spatial.distance import pdist, squareform
+from scipy.spatial.distance import pdist, cdist, squareform
 
 """
 Notation used below:
@@ -29,7 +29,7 @@ class Dataset:
         :param treename: name of the tree in root dataset
         """
         self.hits_data = root2array(path, treename=treename)
-        # Hardcode information about wires in the CDC
+# Hardcode information about wires in the CDC
         self.wires_by_layer = [198, 204, 210, 216, 222, 228, 234, 240, 246,
                                252, 258, 264, 270, 276, 282, 288, 294, 300]
         self.r_layers = [53, 54.6, 56.2, 57.8, 59.4, 61, 62.6, 64.2, 65.8,
@@ -45,18 +45,6 @@ class Dataset:
         self.total_wires = 4482
         assert sum(self.wires_by_layer) == self.total_wires
 
-        self.sig_rho = 30. # determined from truth distribution of radial
-                            # coordinates of hits
-        self.sig_rho_sigma = 2 # defines the spread of the smearing of the
-                                # signal track from the constant value
-        self.trgt_rho = 20. # defined to cover the entire sense volume
-        self.sig_trk_smear = 5   # defines the number of cells the track
-                               # correspondence function will use when
-                               # calculating probabilites
-        self.trk_phi_bins = 20
-        self.trk_rho_bins = 5
-        self.trk_bins = self.trk_phi_bins*self.trk_rho_bins
-
         self.dphi_by_layer = self._calculated_d_phi()
         self.wire_lookup = self._prepare_wires_lookup()
         self.wire_rhos = self._prepare_wire_rho()
@@ -65,9 +53,24 @@ class Dataset:
         self.wire_dists = self._prepare_wire_distances()
         self.wire_neighbours = self._prepare_wire_neighbours()
 
+# Set track fitting parameters
+        self.sig_rho = 30. # determined from truth distribution of radial
+                            # coordinates of hits
+        self.sig_rho_sigma = 2 # defines the spread of the smearing of the
+                                # signal track from the constant value
+        self.trgt_rho = 20. # defined to cover the entire sense volume
+        self.sig_trk_smear = 5   # defines the number of cells the track
+                               # correspondence function will use when
+                               # calculating probabilites
+        self.trk_phi_bins = 40
+        self.trk_rho_bins = 10
+        self.trk_bins = self.trk_phi_bins*self.trk_rho_bins
+
         self.track_lookup = self._prepare_track_lookup()
         self.track_phis = self._prepare_track_phis()
         self.track_rhos = self._prepare_track_rhos()
+        self.track_x, self.track_y = self._prepare_track_cartisian()
+        self.track_wire_dists = self._prepare_track_distances()
         self.correspondence = self._prepare_wire_track_corresp()
 
     @property
@@ -312,6 +315,28 @@ class Dataset:
         return np.fromfunction(lambda x: (x%self.trk_phi_bins)*dphi,
                                (self.trk_bins,))
 
+    def _prepare_track_cartisian(self):
+        """
+        Returns the positions of each wire in cartesian system
+
+        :return: pair of numpy.arrays of shape [n_wires],
+         - first one contains x`s
+         - second one contains y's
+        """
+        x_coor = self.track_rhos * np.cos(self.track_phis)
+        y_coor = self.track_rhos * np.sin(self.track_phis)
+        return x_coor, y_coor
+
+    def _prepare_track_distances(self):
+        """
+        Returns a numpy array of distances between tracks and wires
+        :return: numpy array of shape [n_wires,n_tracks]
+        """
+        wire_xy = np.column_stack((self.wire_x, self.wire_y))
+        track_xy = np.column_stack((self.track_x, self.track_y))
+        distances = cdist(wire_xy, track_xy)
+        return distances
+
     def get_tracks_rhos_and_phis(self):
         """
         Returns the positions of each track center
@@ -322,32 +347,11 @@ class Dataset:
         """
         return self.track_rhos, self.track_phis
 
-    def polar_dist(self, rho_1, phi_1, rho_2, phi_2):
-        """
-        Returns Euclidian distance between to points in polar coordinates
-        """
-        return np.sqrt(rho_1**2 + rho_2**2 - 2*rho_1*rho_2*np.cos(phi_1-phi_2))
-
     def dist_prob(self, distance):
         """
         Defines the probability distribution used for correspondence matrix
         """
         return norm.pdf(distance, scale=self.sig_rho_sigma)
-
-    def trk_wire_dist(self, wr_id, t_bin):
-        """
-        Returns distance between a wire given by wr_id and the center of a
-        potential track given by t_bin
-        """
-        return self.polar_dist(self.wire_rhos[wr_id], self.wire_phis[wr_id],
-                               self.track_rhos[t_bin], self.track_phis[t_bin])
-
-    def trk_wire_prob(self, wr_id, t_bin):
-        """
-        Returns probability that hit on wire belongs to given track bin
-        """
-        return norm.pdf(self.trk_wire_dist(wr_id, t_bin) - self.sig_rho,
-                        scale=self.sig_rho_sigma)
 
     def _prepare_wire_track_corresp(self):
         """
@@ -356,9 +360,9 @@ class Dataset:
         :returns: scipy.sparse matrix of shape [n_wires, n_track_bin]
         """
         corresp = lil_matrix((self.total_wires, self.trk_bins))
-        for trk_bin in range(self.trk_bins):
-            for wire_id in range(self.total_wires):
-                this_dist = self.trk_wire_dist(wire_id, trk_bin) - self.sig_rho
+        for trck in range(self.trk_bins):
+            for wire in range(self.total_wires):
+                this_dist = self.track_wire_dists[wire, trck] - self.sig_rho
                 if abs(this_dist) < self.sig_trk_smear:
-                    corresp[wire_id, trk_bin] = self.dist_prob(this_dist)
+                    corresp[wire, trck] = self.dist_prob(this_dist)
         return corresp
