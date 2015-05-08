@@ -29,9 +29,6 @@ def test_neighbors_counts():
 
 def test_neighbours_count():
     signal_wires = signal.wire_neighbours.sum(axis=1)
-
-
-    expected_n_neighbours = np.zeros_like(si)
     bad_neighs = np.zeros(signal.total_wires)
     for wire in range(signal.total_wires):
         # Count the neighbours
@@ -44,7 +41,6 @@ def test_neighbours_count():
                 bad_neighs[wire] = n_neigh
 
     assert np.sum(bad_neighs) == 0, 'some bad wire exists!'
-
 
 
 def test_no_closer_neighbors():
