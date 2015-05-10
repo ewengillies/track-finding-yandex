@@ -179,6 +179,13 @@ class Array(object):
                     neigh[point, prv_a_point] = 1  # Above/Below Anti-Clockwise
         return neigh.tocsr()
 
+    def _prepare_dphi_by_layer(self):
+        """
+        Returns the phi separation of the points as defined by the number of
+        points in the layer
+        """
+        return 2*math.pi/np.asarray(self.n_by_layer)
+
     def get_neighbours(self, point_id):
         """
         Returns the neighbours of point_id as a list
@@ -187,13 +194,6 @@ class Array(object):
         """
         neighs = find(self.point_neighbours[point_id, :])[1]
         return neighs
-
-    def _prepare_dphi_by_layer(self):
-        """
-        Returns the phi separation of the points as defined by the number of
-        points in the layer
-        """
-        return 2*math.pi/np.asarray(self.n_by_layer)
 
     def get_points_rhos_and_phis(self):
         """
@@ -214,6 +214,60 @@ class Array(object):
          - second one contains phi's (angles)
         """
         return self.point_x, self.point_y
+
+    def get_layer(self, point_id):
+        """
+        Returns the layer index of a given point_id
+
+        :return: Index of layer where point_id is
+        """
+        rho = self.point_rhos[point_id]
+        layer = int(np.where(self.r_by_layer == rho)[0])
+        return layer
+
+    def get_index(self, point_id):
+        """
+        Returns the point index of a given point_id
+
+        :return: Index of layer where point_id is
+        """
+        layer = self.get_layer(point_id)
+        index = point_id - self.first_point[layer]
+        return index
+
+    def shift_wire(self, point_id, shift_size):
+        """
+        Get the index of the wire that is displaced from point_id by
+        shift_size points counter clockwise in the same layer,
+        respecting periodicity.
+
+        :return: index of point shift_size  counter clockwise of point_id
+        """
+        layer = self.get_layer(point_id)
+        index = self.get_index(point_id)
+        index += shift_size
+        index %= self.n_by_layer[layer]
+        new_point = self.point_lookup[layer, index]
+        return new_point
+
+    def rotate_wire(self, point_id, shift_frac):
+        """
+        Get the index of the wire that is displaced from point_id by
+        shift_frac of a revolution counter clockwise in the same layer,
+        respecting periodicity.
+
+        :return: index of point n_points_in_layer*shft_frac points
+                 counter clockwise of point_id
+        """
+        layer = self.get_layer(point_id)
+        index = self.get_index(point_id)
+        n_points_in_layer = self.n_by_layer[layer]
+        shift_size = shift_frac*n_points_in_layer
+        index += shift_size
+        index %= n_points_in_layer
+        new_point = self.point_lookup[layer, index]
+        return new_point
+
 
 class CyDet(Array):
     def __init__(self):

@@ -108,7 +108,7 @@ class AllHits(object):
         # Get all hit wires
         hit_types = self.get_hit_types(event_id)
         # Select signal hits
-        sig_wires = np.where(hit_types == 1)
+        sig_wires = np.where(hit_types == 1)[0]
         return sig_wires
 
     def get_bkg_wires(self, event_id):
@@ -121,7 +121,7 @@ class AllHits(object):
         # Get all hit wires
         hit_types = self.get_hit_types(event_id)
         # Select signal hits
-        bkg_wires = np.where(hit_types == 2)
+        bkg_wires = np.where(hit_types == 2)[0]
         return bkg_wires
 
 class BackgroundHits(object):
@@ -190,20 +190,32 @@ class BackgroundHits(object):
             wires = find(self.hits_by_event[this_event, :])[1]
             # Add these to the total count
             n_wires += len(wires)
+            # Rotate the wires a random amount around the layer
+            rot = self.evt_random.random()
+            new_wires = [self.cydet.rotate_wire(w, rot) for w in wires]
             # Mark event for use in sample
-            self.this_sample[this_event, wires] = 1
+            self.this_sample[this_event, wires] = new_wires
         #Return a row sliceable array
         self.this_sample = self.this_sample.tocsr()
         return self.this_sample
 
     def get_hit_wires(self):
         """
-        Returns the hit wires of the fully constructed event
+        Returns the hit wires of the fully constructed event after rotation
 
         :return: numpy array of hit wires
         """
-        hit_wires = find(self.this_sample)[1]
+        hit_wires = find(self.this_sample)[2]
         return np.unique(hit_wires)
+
+    def get_true_wires(self):
+        """
+        Returns the hit wires of the fully constructed event before rotation
+
+        :return: numpy array of hit wires
+        """
+        true_wires = find(self.this_sample)[1]
+        return np.unique(true_wires)
 
     def get_sample_events(self):
         """
@@ -247,8 +259,7 @@ class BackgroundHits(object):
             # Get the reampled event data
             event = self.bkg_data[event_id]
             # Get the wires from this resampled event
-            #wire_ids = find(self.this_sample[event_id, :])[1]
-            wire_ids = self.get_wires(event_id)
+            wire_ids = self.get_hit_wires()
             # Get the energy deposition of the hit wires
             measurement = event[self.prefix+"_edep"]
             energy_deposit[wire_ids] += measurement
