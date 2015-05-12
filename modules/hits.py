@@ -195,6 +195,9 @@ class BackgroundHits(object):
                 # Rotate the wires a random amount around the layer
                 rot = self.evt_random.random()
                 new_wires = [self.cydet.rotate_wire(w, rot) for w in wires]
+                # Add one to all new wire indecies to avoid problem with
+                # explicit zeros in numpy.sparse matrix
+                new_wires = [n_w + 1 for n_w in new_wires]
                 # Mark event for use in sample
                 self.this_sample[this_event, wires] = new_wires
             # Return a row sliceable array
@@ -211,7 +214,7 @@ class BackgroundHits(object):
         hit_wires = find(self.this_sample)[2]
         return np.unique(hit_wires)
 
-    def get_true_wires(self, event_id):
+    def _get_true_wires(self, event_id):
         """
         Returns the hit wires of the fully constructed event before rotation
 
@@ -231,6 +234,20 @@ class BackgroundHits(object):
         self._get_sample(event_id)
         sample_events = find(self.this_sample)[0]
         return np.unique(sample_events)
+
+    def _get_new_wire_ids(self, event_id, event_index):
+        """
+        Function to mask the use of shifting the new wire_ids when stored in the
+        sparse matrix to avoid problem with explicit zero
+        :param event_id: id of generated event
+        :param event_index: index of sampled event in data file
+
+        :return: rotated hit wire location in generated event, event_id, whose
+                 data corresponds to the hit wires in event_index
+        """
+        self._get_sample(event_id)
+        new_wires = find(self.this_sample[event_index, :])[2] - 1 
+        return new_wires
 
     def get_wires(self, event_index):
         """
@@ -264,15 +281,9 @@ class BackgroundHits(object):
             # Get the reampled event data
             event = self.data[event_index]
             # Get the wire_id's of the rotated wires using the sample map
-            true_ids = self.get_wires(event_index)
-            wire_ids = self.this_sample[event_index, true_ids].data
-            #wire_ids = find(self.this_sample[event_index, :])[2]
+            wire_ids = self._get_new_wire_ids(event_id, event_index)
             # Get the energy deposition of the true hit wires
             measurement = event[self.prefix + "_edep"]
-            assert np.shape(wire_ids) == np.shape(measurement), \
-                'Wire shape and measurement shape not equal.  Wires = \
-                    {}, True Wire = {}, Measurement Shape = {}, Event_id = \
-                    {}'.format(wire_ids, true_ids, measurement, event_index)
             energy_deposit[wire_ids] += measurement
         return energy_deposit
 
