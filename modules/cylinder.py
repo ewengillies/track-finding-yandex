@@ -262,7 +262,7 @@ class Array(object):
         layer = self.get_layer(point_id)
         index = self.get_index(point_id)
         n_points_in_layer = self.n_by_layer[layer]
-        shift_size = shift_frac*n_points_in_layer
+        shift_size = int(round(shift_frac*n_points_in_layer))
         index += shift_size
         index %= n_points_in_layer
         new_point = self.point_lookup[layer, index]
