@@ -10,6 +10,7 @@ Notation used below:
  - point_index is the index of point in the layer
 """
 
+
 class Array(object):
     # pylint: disable=too-many-instance-attributes
     # pylint: disable=bad-continuation
@@ -18,7 +19,7 @@ class Array(object):
         This defines a cylindrical array of points from a layers.  It returns a
         flat enumerator of the points in the array, as well as pairwise
         distances between all points, and the neighbours of each point.  It also
-        stores the position in both cartisian and polar coordinates of each
+        stores the position in both cartesian and polar coordinates of each
         point.
 
         :param n_by_layer: list of number of points by layer, sorted by radii of
@@ -93,8 +94,8 @@ class Array(object):
         for lay, layer_size in enumerate(self.n_by_layer):
             for point in range(layer_size):
                 angles[point_0[lay] + point] = (self.phi0_by_layer[lay]
-                                              + self.dphi_by_layer[lay] * point)
-        angles %= 2*math.pi
+                                                + self.dphi_by_layer[lay] * point)
+        angles %= 2 * math.pi
         return angles
 
     def _prepare_point_cartisian(self):
@@ -134,23 +135,23 @@ class Array(object):
             # Define adjacent layers, noting outer most layers only have one
             # adjacent layer
             if lay == 0:
-                adjacent_layers = [lay+1]
+                adjacent_layers = [lay + 1]
             elif lay == len(self.n_by_layer) - 1:
-                adjacent_layers = [lay-1]
+                adjacent_layers = [lay - 1]
             else:
-                adjacent_layers = [lay-1, lay+1]
+                adjacent_layers = [lay - 1, lay + 1]
             # Loop over points in current layer
             for point_index in range(n_points):
                 # Define current wire, and wire counter-clockwise of this wire
-                point = point_index +  self.first_point[lay]
-                nxt_point = (point_index + 1)%n_points + self.first_point[lay]
+                point = point_index + self.first_point[lay]
+                nxt_point = (point_index + 1) % n_points + self.first_point[lay]
                 # Define reciprocal neighbour relations on current layer
                 neigh[nxt_point, point] = 1  # Clockwise
                 neigh[point, nxt_point] = 1  # Anti-Clockwise
                 # Define neighbour relations for adjacent layers
                 # Start by finding position of point on layer (circle) as a
                 # fraction
-                rel_pos = self.point_phis[point]/(2*math.pi)
+                rel_pos = self.point_phis[point] / (2 * math.pi)
                 # Loop over adjacent layers
                 for a_lay in adjacent_layers:
                     # Set constants of adjacent layer
@@ -159,7 +160,7 @@ class Array(object):
                     # Find point in adjacent layer closest in phi to
                     # current point
                     # Account for phi0
-                    a_point = rel_pos - (self.phi0_by_layer[a_lay]/(2*math.pi))
+                    a_point = rel_pos - (self.phi0_by_layer[a_lay] / (2 * math.pi))
                     # Find index of adjacent layer point
                     a_point *= a_n_points
                     a_point = round(a_point)
@@ -167,14 +168,14 @@ class Array(object):
                     a_point %= a_n_points
                     # Find points clockwise and counter clockwise to the layer
                     # adjacent point
-                    nxt_a_point = (a_point+1)%a_n_points
-                    prv_a_point = (a_point-1)%a_n_points
+                    nxt_a_point = (a_point + 1) % a_n_points
+                    prv_a_point = (a_point - 1) % a_n_points
                     # Find the point_id for these three points
                     a_point += a_first
                     nxt_a_point += a_first
                     prv_a_point += a_first
                     # Define neighbour relations for points in adjacent layers
-                    neigh[point, a_point] = 1      # Above/Below
+                    neigh[point, a_point] = 1  # Above/Below
                     neigh[point, nxt_a_point] = 1  # Above/Below Clockwise
                     neigh[point, prv_a_point] = 1  # Above/Below Anti-Clockwise
         return neigh.tocsr()
@@ -184,7 +185,7 @@ class Array(object):
         Returns the phi separation of the points as defined by the number of
         points in the layer
         """
-        return 2*math.pi/np.asarray(self.n_by_layer)
+        return 2 * math.pi / np.asarray(self.n_by_layer)
 
     def get_neighbours(self, point_id):
         """
@@ -255,6 +256,7 @@ class Array(object):
         Get the index of the wire that is displaced from point_id by
         shift_frac of a revolution counter clockwise in the same layer,
         respecting periodicity.
+        :param shift_frac: from [0, 1], 1 is complete rotation
 
         :return: index of point n_points_in_layer*shft_frac points
                  counter clockwise of point_id
@@ -262,7 +264,7 @@ class Array(object):
         layer = self.get_layer(point_id)
         index = self.get_index(point_id)
         n_points_in_layer = self.n_by_layer[layer]
-        shift_size = int(round(shift_frac*n_points_in_layer))
+        shift_size = int(round(shift_frac * n_points_in_layer))
         index += shift_size
         index %= n_points_in_layer
         new_point = self.point_lookup[layer, index]
@@ -278,14 +280,15 @@ class CyDet(Array):
                        252, 258, 264, 270, 276, 282, 288, 294, 300]
         cydet_radii = [53, 54.6, 56.2, 57.8, 59.4, 61, 62.6, 64.2, 65.8,
                        67.4, 69, 70.6, 72.2, 73.8, 75.4, 77, 78.6, 80.2]
-#        self.phi0_by_layer = [0.00000, 0.015867, 0.015400, 0.000000, 0.014544,
-#                              0.00000, 0.000000, 0.013426, 0.000000, 0.012771,
-#                              0.00000, 0.012177, 0.000000, 0.011636, 0.000000,
-#                              0.00000, 0.000000, 0.010686, 0.000000, 0.010267]
+        # self.phi0_by_layer = [0.00000, 0.015867, 0.015400, 0.000000, 0.014544,
+        #                              0.00000, 0.000000, 0.013426, 0.000000, 0.012771,
+        #                              0.00000, 0.012177, 0.000000, 0.011636, 0.000000,
+        #                              0.00000, 0.000000, 0.010686, 0.000000, 0.010267]
         cydet_phi0 = [0.015867, 0.0, 0.0, 0.0, 0.0, 0.014960,
                       0.014960, 0.0, 0.0, 0.0, 0.0, 0.000000,
                       0.000000, 0.0, 0.0, 0.0, 0.0, 0.000000]
         Array.__init__(self, cydet_wires, cydet_radii, cydet_phi0)
+
 
 class TrackCenters(Array):
     def __init__(self, r_min=10., r_max=50., rho_bins=10, arc_res=0):
@@ -305,13 +308,13 @@ class TrackCenters(Array):
         """
         # Define distance between layers to that the radii fall in [r_min,
         # r_max] inclusive
-        drho = (r_max - r_min)/(rho_bins-1)
-        r_track_cent = [r_min + drho*n for n in range(rho_bins)]
+        drho = (r_max - r_min) / (rho_bins - 1)
+        r_track_cent = [r_min + drho * n for n in range(rho_bins)]
         # Set default spacial resolution along layers to be the same as the
         # resolution between layers
         if arc_res == 0:
             arc_res = drho
-        n_track_cent = [int(round(2*math.pi*r_track_cent[n]/arc_res))
+        n_track_cent = [int(round(2 * math.pi * r_track_cent[n] / arc_res))
                         for n in range(rho_bins)]
         phi0_track_cent = [0] * rho_bins
         Array.__init__(self, n_track_cent, r_track_cent, phi0_track_cent)
