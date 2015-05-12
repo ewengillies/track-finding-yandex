@@ -114,8 +114,8 @@ class Dataset(object):
         """
         wire_0 = self.first_wire
         radii = np.zeros(self.total_wires, dtype=float)
-        for lay, size in enumerate(self.wires_by_layer):
-            radii[wire_0[lay]:wire_0[lay] + size] = self.r_layers[lay]
+        for layer, size in enumerate(self.wires_by_layer):
+            radii[wire_0[layer]:wire_0[layer] + size] = self.r_layers[layer]
         return radii
 
     def _prepare_wire_phi(self):
@@ -160,7 +160,7 @@ class Dataset(object):
         neighbours of wire_0
 
         :return: scipy.sparse Compressed Sparse Row of shape
-        [total_wires,total_wires]
+        [total_wires, total_wires]
         """
         neigh = lil_matrix((self.total_wires, self.total_wires))
         for lay, n_wires in enumerate(self.wires_by_layer):

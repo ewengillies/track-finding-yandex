@@ -1,6 +1,6 @@
 import numpy as np
 from root_numpy import root2array
-#import math
+# import math
 from cylinder import CyDet
 from random import Random
 from scipy.sparse import lil_matrix, find
@@ -11,6 +11,7 @@ Notation used below:
  - layer_id is the index of layer
  - wire_index is the index of wire in the layer
 """
+
 
 class SignalHits(object):
     # pylint: disable=too-many-instance-attributes
@@ -41,8 +42,8 @@ class SignalHits(object):
         # Select the relevant event from data
         event = self.data[event_id]
         # Recover an ordered list of wire_index and corresponding wire_ids
-        wire_index = event[self.prefix+"_cellID"]
-        layer_ids = event[self.prefix+"_layerID"]
+        wire_index = event[self.prefix + "_cellID"]
+        layer_ids = event[self.prefix + "_layerID"]
         # Flatten these into the point_ids from the cydet
         wire_ids = self.cydet.point_lookup[layer_ids, wire_index]
         assert np.all(wire_ids >= 0), \
@@ -73,7 +74,7 @@ class SignalHits(object):
 
         :return: numpy.array of shape [CyDet.n_points]
         """
-        energy_deposit = self.get_measurement(event_id, self.prefix+"_edep")
+        energy_deposit = self.get_measurement(event_id, self.prefix + "_edep")
         return energy_deposit
 
     def get_hit_types(self, event_id):
@@ -89,7 +90,7 @@ class SignalHits(object):
         # Get the wire_ids of the hit data
         wire_ids = self.get_hit_wires(event_id)
         # Select the hit type leaf
-        measurement = event[self.prefix+"_hittype"]
+        measurement = event[self.prefix + "_hittype"]
         # Define custom coding
         coding = [1, 2, 2, 2]
         # Maps signal to 1, background to 2, and nothing to 0
@@ -124,17 +125,19 @@ class SignalHits(object):
         bkg_wires = np.where(hit_types == 2)[0]
         return bkg_wires
 
+
 class AllHits(SignalHits):
     def __init__(self, path="../data/signal_TDR.root", tree='tree'):
         cydet = CyDet()
         SignalHits.__init__(cydet, path, tree)
+
 
 class BackgroundHits(object):
     # pylint: disable=too-many-instance-attributes
     # pylint: disable=bad-continuation
     # pylint: disable=relative-import
     def __init__(self, cydet, path="data/proton_from_muon_capture",
-                       tree='tree', hits=1000):
+                 tree='tree', hits=1000):
         """
         This generates hit data from a file in which both only background hits
         exist. It resamples the input file until to generate events with the
@@ -165,13 +168,16 @@ class BackgroundHits(object):
         reproducibility.  The generated matrix maps from resampled event index
         and hit wire, to hit wire location in fully construced event
 
-        :return: scipy.sparse.csr of shape [n_events, CyDet.n_points] which
-                 defines the events used and corresponding hit wires in them.
-                 The value of the matrix is the new hit wire in the
-                 reconstructed event, which is the original hit rotated by a
-                 random value
+        Generates to internal field
+
+         scipy.sparse.csr of shape [n_events, CyDet.n_points] which
+         defines the events used and corresponding hit wires in them.
+         The value of the matrix is the new hit wire in the
+         reconstructed event, which is the original hit rotated by a
+         random value
         """
         if self.event_index != event_id:
+            # otherwise everything was done previously and cached
             print "Getting sample {}".format(event_id)
             self.this_sample = lil_matrix((self.n_events, self.cydet.n_points),
                                           dtype=np.int16)
@@ -181,7 +187,7 @@ class BackgroundHits(object):
             n_wires = 0
             while n_wires < self.n_hits:
                 # Select an event randomly
-                this_event = self.evt_random.randint(0, self.n_events-1)
+                this_event = self.evt_random.randint(0, self.n_events - 1)
                 # Find the hit wires in the event
                 wires = self.get_wires(this_event)
                 # Add these to the total count
@@ -191,7 +197,7 @@ class BackgroundHits(object):
                 new_wires = [self.cydet.rotate_wire(w, rot) for w in wires]
                 # Mark event for use in sample
                 self.this_sample[this_event, wires] = new_wires
-            #Return a row sliceable array
+            # Return a row sliceable array
             self.this_sample = self.this_sample.tocsr()
             self.event_index = event_id
 
@@ -236,8 +242,8 @@ class BackgroundHits(object):
         # Select the relevant sampled event
         event = self.data[event_index]
         # Select the relevant sampled event
-        wire_index = event[self.prefix+"_cellID"]
-        layer_ids = event[self.prefix+"_layerID"]
+        wire_index = event[self.prefix + "_cellID"]
+        layer_ids = event[self.prefix + "_layerID"]
         # Get the relevant wire_ids
         wire_ids = self.cydet.point_lookup[layer_ids, wire_index]
         assert np.all(wire_ids >= 0), \
@@ -262,21 +268,22 @@ class BackgroundHits(object):
             wire_ids = self.this_sample[event_index, true_ids].data
             #wire_ids = find(self.this_sample[event_index, :])[2]
             # Get the energy deposition of the true hit wires
-            measurement = event[self.prefix+"_edep"]
+            measurement = event[self.prefix + "_edep"]
             assert np.shape(wire_ids) == np.shape(measurement), \
-                    'Wire shape and measurement shape not equal.  Wires = \
+                'Wire shape and measurement shape not equal.  Wires = \
                     {}, True Wire = {}, Measurement Shape = {}, Event_id = \
                     {}'.format(wire_ids, true_ids, measurement, event_index)
             energy_deposit[wire_ids] += measurement
         return energy_deposit
+
 
 class ResampledHits(object):
     # pylint: disable=too-many-instance-attributes
     # pylint: disable=bad-continuation
     # pylint: disable=relative-import
     def __init__(self, sig_path="../data/signal_TDR.root", sig_tree='tree',
-         bkg_path="../data/proton_from_muon_capture_bg.root", bkg_tree='tree',
-         occupancy=0.10):
+                 bkg_path="../data/proton_from_muon_capture_bg.root", bkg_tree='tree',
+                 occupancy=0.10):
         """
         This generates hit data from a file in which both background and signal
         are included and coded. It assumes the naming convention
@@ -293,7 +300,7 @@ class ResampledHits(object):
         self.n_events = self.sig_hits.n_events
         self.event_index = 0
 
-        total_bkg_hits = round(occupancy*self.cydet.n_points)
+        total_bkg_hits = round(occupancy * self.cydet.n_points)
         self.bkg_hits.n_hits = total_bkg_hits
 
     def get_hit_wires(self, event_id):
