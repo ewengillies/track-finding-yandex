@@ -41,7 +41,8 @@ class Array(object):
         self.point_phis = self._prepare_point_phi()
         self.point_x, self.point_y = self._prepare_point_cartisian()
         self.point_dists = self._prepare_point_distances()
-        self.point_neighbours = self._prepare_point_neighbours()
+        self.point_neighbours, self.lr_neighbours = \
+                self._prepare_point_neighbours()
 
     def _get_first_point(self):
         """
@@ -94,7 +95,7 @@ class Array(object):
         for lay, layer_size in enumerate(self.n_by_layer):
             for point in range(layer_size):
                 angles[point_0[lay] + point] = (self.phi0_by_layer[lay]
-                                                + self.dphi_by_layer[lay] * point)
+                                                + self.dphi_by_layer[lay]*point)
         angles %= 2 * math.pi
         return angles
 
@@ -129,7 +130,10 @@ class Array(object):
         :return: scipy.sparse Compressed Sparse Row of shape
         [n_points,n_points]
         """
+        # All neighbours
         neigh = lil_matrix((self.n_points, self.n_points))
+        # Only left and right neighbours
+        lr_neigh = lil_matrix((self.n_points, self.n_points))
         # Loop over all layers
         for lay, n_points in enumerate(self.n_by_layer):
             # Define adjacent layers, noting outer most layers only have one
@@ -147,7 +151,9 @@ class Array(object):
                 nxt_point = (point_index + 1) % n_points + self.first_point[lay]
                 # Define reciprocal neighbour relations on current layer
                 neigh[nxt_point, point] = 1  # Clockwise
+                lr_neigh[nxt_point, point] = 1
                 neigh[point, nxt_point] = 1  # Anti-Clockwise
+                lr_neigh[point, nxt_point] = 1
                 # Define neighbour relations for adjacent layers
                 # Start by finding position of point on layer (circle) as a
                 # fraction
@@ -160,7 +166,7 @@ class Array(object):
                     # Find point in adjacent layer closest in phi to
                     # current point
                     # Account for phi0
-                    a_point = rel_pos - (self.phi0_by_layer[a_lay] / (2 * math.pi))
+                    a_point = rel_pos - (self.phi0_by_layer[a_lay]/(2*math.pi))
                     # Find index of adjacent layer point
                     a_point *= a_n_points
                     a_point = round(a_point)
@@ -178,7 +184,7 @@ class Array(object):
                     neigh[point, a_point] = 1  # Above/Below
                     neigh[point, nxt_a_point] = 1  # Above/Below Clockwise
                     neigh[point, prv_a_point] = 1  # Above/Below Anti-Clockwise
-        return neigh.tocsr()
+        return neigh.tocsr(), lr_neigh.tocsr()
 
     def _prepare_dphi_by_layer(self):
         """
@@ -270,7 +276,6 @@ class Array(object):
         new_point = self.point_lookup[layer, index]
         return new_point
 
-
 class CyDet(Array):
     def __init__(self):
         """
@@ -281,9 +286,9 @@ class CyDet(Array):
         cydet_radii = [53, 54.6, 56.2, 57.8, 59.4, 61, 62.6, 64.2, 65.8,
                        67.4, 69, 70.6, 72.2, 73.8, 75.4, 77, 78.6, 80.2]
         # self.phi0_by_layer = [0.00000, 0.015867, 0.015400, 0.000000, 0.014544,
-        #                              0.00000, 0.000000, 0.013426, 0.000000, 0.012771,
-        #                              0.00000, 0.012177, 0.000000, 0.011636, 0.000000,
-        #                              0.00000, 0.000000, 0.010686, 0.000000, 0.010267]
+        #                       0.00000, 0.000000, 0.013426, 0.000000, 0.012771,
+        #                       0.00000, 0.012177, 0.000000, 0.011636, 0.000000,
+        #                       0.00000, 0.000000, 0.010686, 0.000000, 0.010267]
         cydet_phi0 = [0.015867, 0.0, 0.0, 0.0, 0.0, 0.014960,
                       0.014960, 0.0, 0.0, 0.0, 0.0, 0.000000,
                       0.000000, 0.0, 0.0, 0.0, 0.0, 0.000000]

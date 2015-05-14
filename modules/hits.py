@@ -1,6 +1,6 @@
 import numpy as np
 from root_numpy import root2array
-# import math
+import math
 from cylinder import CyDet
 from random import Random
 from scipy.sparse import lil_matrix, find
@@ -77,6 +77,59 @@ class SignalHits(object):
         energy_deposit = self.get_measurement(event_id, self.prefix + "_edep")
         return energy_deposit
 
+    def get_hit_time(self, event_id):
+        """
+        Returns the timing of the hit
+
+        :return: numpy.array of shape [CyDet.n_points]
+        """
+        time_hit = self.get_measurement(event_id, self.prefix + "_tstart")
+        return time_hit
+
+    def get_trigger_time(self, event_id):
+        """
+        Returns energy deposit in all wires
+
+        :return: numpy.array of shape [CyDet.n_points]
+        """
+        event = self.data[event_id]
+        this_trig_time = event[self.prefix + "_mt"]
+        trig_time = np.zeros((self.cydet.n_points))
+        trig_time[self.get_hit_wires(event_id)] = this_trig_time
+        return trig_time
+
+    def get_relative_time(self, event_id):
+        """
+        Returns the difference between the start time of the hit and the time of
+        the trigger.  This value is capped to the time window of 1170 ns
+
+        :return: numpy array of (t_start_hit - t_trig)%1170
+        """
+        trig_time = self.get_trigger_time(event_id)
+        hit_time = self.get_hit_time(event_id)
+        # return np.remainder(hit_time - trig_time, 1170)
+        return np.remainder(hit_time - trig_time, 1170)
+
+    def get_time_neighbours_metric(self, event_id):
+        """
+        Returns a non-physical value which is largest for hits with no
+        left-right neighbouring hits, large for hits who's neighbouring hits
+        happen at a very different times, and small for cells whose neighbours
+        happen at a very close time
+
+        :return: numpy array non-physical measure of how close in time
+                 LR neighbouring hits are
+        """
+        t_hits = self.get_hit_time(event_id)
+        hit_wires = self.get_hit_wires(event_id)
+        result = np.zeros(self.cydet.n_points)
+        for wire in hit_wires:
+            for shift in [1, -1]:
+                sh_wire = self.cydet.shift_wire(wire, shift)
+                t_metric = abs((t_hits[sh_wire]+1)/(t_hits[wire]+1))
+                result[wire] += t_metric
+        return result
+
     def get_hit_types(self, event_id):
         """
         Returns hit type in all wires, where signal is 1, background is 2,
@@ -125,11 +178,32 @@ class SignalHits(object):
         bkg_wires = np.where(hit_types == 2)[0]
         return bkg_wires
 
+    def get_prob_sig_wire(self, evt):
+        """
+        Returns an array of probabilities that a wire is a signal wire, based
+        soley on energy deposition
+
+        :return: numpy array of probabilities of signal or not
+        """
+        probability = np.zeros(self.cydet.n_points)
+        # Only look at hit wires, so that all wires with no hits are
+        # automatically zero
+        h_wires = self.get_hit_wires(evt)
+        # Define three signal regions, from highest energy thrshold to lowest
+        #sig_0 = np.where(self.get_energy_deposits(evt)[h_wires] < 0.00001)[0]
+        sig_1 = np.where(self.get_energy_deposits(evt)[h_wires] < 0.000005)[0]
+        #sig_2 = np.where(self.get_energy_deposits(evt)[h_wires] < 0.0000025)[0]
+        # Add 0.3 for every time the wire lands within an energy theshold
+        #probability[sig_0] += 0.3
+        probability[sig_1] += 1.0
+        #probability[sig_2] += 0.3
+        return probability
+
 
 class AllHits(SignalHits):
     def __init__(self, path="../data/signal_TDR.root", tree='tree'):
         cydet = CyDet()
-        SignalHits.__init__(cydet, path, tree)
+        SignalHits.__init__(self, cydet, path, tree)
 
 
 class BackgroundHits(object):
@@ -246,7 +320,7 @@ class BackgroundHits(object):
                  data corresponds to the hit wires in event_index
         """
         self._get_sample(event_id)
-        new_wires = find(self.this_sample[event_index, :])[2] - 1 
+        new_wires = find(self.this_sample[event_index, :])[2] - 1
         return new_wires
 
     def get_wires(self, event_index):
@@ -287,14 +361,40 @@ class BackgroundHits(object):
             energy_deposit[wire_ids] += measurement
         return energy_deposit
 
+    def get_hit_time(self, event_id):
+        """
+        Returns the energy deposition in each wire by taking the timing of the
+        earliest hit from the resampled event that contibuted to the
+        corresponding hit in the generated event
+
+        :return: numpy.array of shape [CyDet.n_points]
+        """
+        time_hit = np.zeros(self.cydet.n_points)
+        # Loop over the resampled events
+        for event_index in self._get_sample_events(event_id):
+            # Get the reampled event data
+            event = self.data[event_index]
+            # Get the wire_id's of the rotated wires using the sample map
+            wire_ids = self._get_new_wire_ids(event_id, event_index)
+            # Get the timing of the true hit wires
+            timing = event[self.prefix + "_t"]%1170
+            # Noting that (timing) and (wire_ids) have corresponding order, open
+            # a loop over the wires, noting the index in the wire_ids list
+            # itself
+            for place, wire in enumerate(wire_ids):
+                # If this wire's entry has not been assigned, or if it is
+                # greater that the new value, assign the new value
+                if (time_hit[wire] == 0) | (time_hit[wire] > timing[place]):
+                    time_hit[wire] = timing[place]
+        return time_hit
 
 class ResampledHits(object):
     # pylint: disable=too-many-instance-attributes
     # pylint: disable=bad-continuation
     # pylint: disable=relative-import
-    def __init__(self, sig_path="../data/signal_TDR.root", sig_tree='tree',
-                 bkg_path="../data/proton_from_muon_capture_bg.root", bkg_tree='tree',
-                 occupancy=0.10):
+    def __init__(self, sig_path="../data/signal.root", sig_tree='tree',
+                 bkg_path="../data/proton_from_muon_capture_bg.root",
+                 bkg_tree='tree', occupancy=0.10):
         """
         This generates hit data from a file in which both background and signal
         are included and coded. It assumes the naming convention
@@ -310,7 +410,6 @@ class ResampledHits(object):
         self.bkg_hits = BackgroundHits(self.cydet, path=bkg_path, tree=bkg_tree)
         self.n_events = self.sig_hits.n_events
         self.event_index = 0
-
         total_bkg_hits = round(occupancy * self.cydet.n_points)
         self.bkg_hits.n_hits = total_bkg_hits
 
