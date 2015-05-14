@@ -40,6 +40,7 @@ class Array(object):
         self.point_rhos = self._prepare_point_rho()
         self.point_phis = self._prepare_point_phi()
         self.point_x, self.point_y = self._prepare_point_cartisian()
+        self.point_pol = self._prepare_polarity()
         self.point_dists = self._prepare_point_distances()
         self.point_neighbours, self.lr_neighbours = \
                 self._prepare_point_neighbours()
@@ -192,6 +193,21 @@ class Array(object):
         points in the layer
         """
         return 2 * math.pi / np.asarray(self.n_by_layer)
+
+    def _prepare_polarity(self):
+        """
+        Prepare a table to record if the point is on an even or an odd layer,
+        where the inner most layer is the zeroth layer.  0 value denotes even
+        layer, 1 value denotes odd layer
+
+        :return: numpy.array of shape [n_points] whose value is 1 for an odd
+                 layer, 0 for an even layer
+        """
+        point_0 = self.first_point
+        polarity = np.zeros(self.n_points, dtype=float)
+        for lay, size in enumerate(self.n_by_layer):
+            polarity[point_0[lay]:point_0[lay] + size] = lay%2
+        return polarity
 
     def get_neighbours(self, point_id):
         """

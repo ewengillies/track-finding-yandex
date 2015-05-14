@@ -1,6 +1,5 @@
 import numpy as np
 from root_numpy import root2array
-import math
 from cylinder import CyDet
 from random import Random
 from scipy.sparse import lil_matrix, find
@@ -50,6 +49,47 @@ class SignalHits(object):
             'Wrong id of wire here {} {}'.format(layer_ids[wire_ids < 0],
                                                  wire_index[wire_ids < 0])
         return wire_ids
+
+    def get_hit_vector(self, event_id):
+        """
+        Returns a vector denoting whether or not a wire has a hit on it. Returns
+        1 for a hit, 0 for no hit
+
+        :retun: numpy array of shape [n_wires] whose value is 1 for a hit, 0 for
+                no hit
+        """
+        hit_vector = np.zeros(self.cydet.n_points)
+        hit_vector[self.get_hit_wires(event_id)] = 1
+        return hit_vector
+
+    def get_hit_wires_even_odd(self, event_id):
+        """
+        Returns two sequences of wire_ids that register hits in given event, the
+        first is only in even layers, the second is only in odd layers
+
+        :return: numpy array of hit wires
+        """
+        hit_wires = self.get_hit_wires(event_id)
+        odd_wires = np.where((self.cydet.point_pol == 1))[0]
+        even_hit_wires = np.setdiff1d(hit_wires, odd_wires, assume_unique=True)
+        odd_hit_wires = np.intersect1d(hit_wires, odd_wires, assume_unique=True)
+        return even_hit_wires, odd_hit_wires
+
+    def get_hit_vector_even_odd(self, event_id):
+        """
+        Returns a vector denoting whether or not a wire on an odd layer has a
+        hit on it. Returns 1 for a hit in an odd layer, 0 for no hit and all
+        even layers
+
+        :retun: numpy array of shape [n_wires] whose value is 1 for a hit on an
+                odd layer, 0 otherwise
+        """
+        even_wires, odd_wires = self.get_hit_wires_even_odd(event_id)
+        even_hit_vector = np.zeros(self.cydet.n_points)
+        even_hit_vector[even_wires] = 1
+        odd_hit_vector = np.zeros(self.cydet.n_points)
+        odd_hit_vector[odd_wires] = 1
+        return even_hit_vector, odd_hit_vector
 
     def get_measurement(self, event_id, name):
         """

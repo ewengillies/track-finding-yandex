@@ -1,9 +1,9 @@
 import numpy as np
-from scipy.stats import norm
 #import math
-from scipy.sparse import lil_matrix
+from scipy.sparse import lil_matrix, find
 from scipy.spatial.distance import cdist
 from cylinder import TrackCenters
+from scipy.stats import norm
 
 """
 Notation used below:
@@ -16,6 +16,7 @@ Notation used below:
 class Hough(object):
     # pylint: disable=too-many-instance-attributes
     # pylint: disable=bad-continuation
+    # pylint: disable=no-name-in-module
     def __init__(self, hit_data, sig_rho=30., sig_rho_sgma=2., sig_rho_smear=5.,
                  trgt_rho=20.):
         """
@@ -62,7 +63,7 @@ class Hough(object):
         r_min = max(self.sig_rho - self.trgt_rho,
                     self.hit_data.cydet.r_by_layer[1]
                         - self.sig_rho - self.sig_trk_smear)
-        self.track = TrackCenters(rho_bins=10, r_min=r_min, r_max=r_max)
+        self.track = TrackCenters(rho_bins=20, r_min=r_min, r_max=r_max)
 
         self.track_wire_dists = self._prepare_track_distances()
         self.correspondence = self._prepare_wire_track_corresp()
@@ -107,5 +108,38 @@ class Hough(object):
                     corsp[wire, trck] = self.dist_prob(this_dist)
         return corsp
 
-    def find_track(self):
-        print "I found a track!"
+    def get_track_correspondance(self, track_id, values=False):
+        """
+        Returns the indecies and values of the wires with non-zero
+        correspondence to track center labeled by track_id
+
+        :param values: returns the values as the second return value
+        :return: indecies of the wires with non-zero correspondence, optionally
+                 returns corresponding value
+        """
+        corr_both = find(self.correspondence[:, track_id])
+        corr_wire = corr_both[0]
+        corr_value = corr_both[2]
+        if values:
+            return corr_wire, corr_value
+        else:
+            return corr_wire
+
+    def get_wire_correspondance(self, wire_id, values=False):
+        """
+        Returns the indecies and values of the track centers with non-zero
+        correspondence to wire labeled by track_id
+
+        :param values: if true, returns the correspondence values as the second
+                       return value
+        :return: indecies of the wires with non-zero correspondence, optionally
+                 returns corresponding value
+        """
+        corr_both = find(self.correspondence[wire_id, :])
+        corr_track = corr_both[1]
+        corr_value = corr_both[2]
+        if values:
+            return corr_track, corr_value
+        else:
+            return corr_track
+
