@@ -1,9 +1,8 @@
 import numpy as np
-#import math
+import math
 from scipy.sparse import lil_matrix, find
 from scipy.spatial.distance import cdist
 from cylinder import TrackCenters
-from scipy.stats import norm
 
 """
 Notation used below:
@@ -17,8 +16,8 @@ class Hough(object):
     # pylint: disable=too-many-instance-attributes
     # pylint: disable=bad-continuation
     # pylint: disable=no-name-in-module
-    def __init__(self, hit_data, sig_rho=30., sig_rho_sgma=2., sig_rho_smear=5.,
-                 trgt_rho=20.):
+    def __init__(self, hit_data, sig_rho=33.6, sig_rho_max=35.,
+                 sig_rho_min=24, sig_rho_sgma=3., trgt_rho=20.):
         """
         This class resprsents a hough transform method. It initiates from a data
         file, and over lays a track center geometry on this.  It also defines a
@@ -51,18 +50,18 @@ class Hough(object):
 
         self.hit_data = hit_data
         self.sig_rho = sig_rho
+        self.sig_rho_max = sig_rho_max
+        self.sig_rho_min = sig_rho_min
         self.sig_rho_sgma = sig_rho_sgma
         self.trgt_rho = trgt_rho
-        self.sig_trk_smear = sig_rho_smear
 
         # Set the geometry of the TrackCenters to cover regions where the signal
         # track passes through the target and the CyDet volume.  Specifically,
         # enforce that the track's outer most hits may lie in the first or last
         # layer.
-        r_max = self.hit_data.cydet.r_by_layer[-2] - self.sig_rho
-        r_min = max(self.sig_rho - self.trgt_rho,
-                    self.hit_data.cydet.r_by_layer[1]
-                        - self.sig_rho - self.sig_trk_smear)
+        r_max = self.hit_data.cydet.r_by_layer[-1] - self.sig_rho_max
+        r_min = max(self.sig_rho_max - self.trgt_rho,
+                    self.hit_data.cydet.r_by_layer[0] - self.sig_rho_max)
         self.track = TrackCenters(rho_bins=20, r_min=r_min, r_max=r_max)
 
         self.track_wire_dists = self._prepare_track_distances()
@@ -86,7 +85,13 @@ class Hough(object):
 
         :return: Gaussian of distance
         """
-        return norm.pdf(distance, scale=self.sig_rho_sgma)
+        distance -= self.sig_rho
+        # Lower radii return a fitted gaussian function
+        if distance < 0:
+            return math.exp(-(distance**2)/(2.*(self.sig_rho_sgma**2))) + 0.05
+        # Higher radii retun a linear decrease to just over the max value
+        if distance >= 0:
+            return 1.05 - distance/(self.sig_rho_max - self.sig_rho + 0.1)
 
     def _prepare_wire_track_corresp(self):
         """
@@ -102,9 +107,10 @@ class Hough(object):
             for wire in range(self.hit_data.cydet.n_points):
                 # Calculate how far the wire is from the signal track centered
                 # at the current track center
-                this_dist = self.track_wire_dists[wire, trck] - self.sig_rho
+                this_dist = self.track_wire_dists[wire, trck]
                 # If its within tolerance, return a probability
-                if abs(this_dist) < self.sig_trk_smear:
+                if (this_dist <= self.sig_rho_max) and  \
+                   (this_dist >= self.sig_rho_min):
                     corsp[wire, trck] = self.dist_prob(this_dist)
         return corsp
 
