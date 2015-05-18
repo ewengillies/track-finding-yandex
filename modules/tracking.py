@@ -1,5 +1,4 @@
 import numpy as np
-#import math
 from scipy.sparse import lil_matrix, find
 from scipy.spatial.distance import cdist
 from cylinder import TrackCenters
@@ -20,7 +19,7 @@ class Hough(object):
     def __init__(self, hit_data, sig_rho=30., sig_rho_sgma=2., sig_rho_smear=5.,
                  trgt_rho=20.):
         """
-        This class resprsents a hough transform method. It initiates from a data
+        This class represents a Hough transform method. It initiates from a data
         file, and over lays a track center geometry on this.  It also defines a
         signal track radius. The track center geometry is defined so that only
         track centers that yield signal tracks that pass through the CyDet and
@@ -62,7 +61,7 @@ class Hough(object):
         r_max = self.hit_data.cydet.r_by_layer[-2] - self.sig_rho
         r_min = max(self.sig_rho - self.trgt_rho,
                     self.hit_data.cydet.r_by_layer[1]
-                        - self.sig_rho - self.sig_trk_smear)
+                    - self.sig_rho - self.sig_trk_smear)
         self.track = TrackCenters(rho_bins=20, r_min=r_min, r_max=r_max)
 
         self.track_wire_dists = self._prepare_track_distances()
