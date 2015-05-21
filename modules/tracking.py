@@ -1,8 +1,5 @@
 import numpy as np
-<<<<<<< HEAD
 import math
-=======
->>>>>>> c2d94d64f80109c753089f0f2ead09da13f0e3ed
 from scipy.sparse import lil_matrix, find
 from scipy.spatial.distance import cdist
 from cylinder import TrackCenters
@@ -20,7 +17,7 @@ class Hough(object):
     # pylint: disable=bad-continuation
     # pylint: disable=no-name-in-module
     def __init__(self, hit_data, sig_rho=33.6, sig_rho_max=35.,
-                 sig_rho_min=24, sig_rho_sgma=3., trgt_rho=20.):
+                 sig_rho_min=24, sig_rho_sgma=3., trgt_rho=20., rho_bins=20):
         """
         This class represents a Hough transform method. It initiates from a data
         file, and over lays a track center geometry on this.  It also defines a
@@ -62,17 +59,10 @@ class Hough(object):
         # track passes through the target and the CyDet volume.  Specifically,
         # enforce that the track's outer most hits may lie in the first or last
         # layer.
-<<<<<<< HEAD
         r_max = self.hit_data.cydet.r_by_layer[-1] - self.sig_rho_max
         r_min = max(self.sig_rho_max - self.trgt_rho,
                     self.hit_data.cydet.r_by_layer[0] - self.sig_rho_max)
-=======
-        r_max = self.hit_data.cydet.r_by_layer[-2] - self.sig_rho
-        r_min = max(self.sig_rho - self.trgt_rho,
-                    self.hit_data.cydet.r_by_layer[1]
-                    - self.sig_rho - self.sig_trk_smear)
->>>>>>> c2d94d64f80109c753089f0f2ead09da13f0e3ed
-        self.track = TrackCenters(rho_bins=20, r_min=r_min, r_max=r_max)
+        self.track = TrackCenters(rho_bins=rho_bins, r_min=r_min, r_max=r_max)
 
         self.track_wire_dists = self._prepare_track_distances()
         self.correspondence = self._prepare_wire_track_corresp()
@@ -158,4 +148,3 @@ class Hough(object):
             return corr_track, corr_value
         else:
             return corr_track
-
