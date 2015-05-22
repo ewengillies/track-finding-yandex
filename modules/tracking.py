@@ -65,7 +65,7 @@ class Hough(object):
         self.track = TrackCenters(rho_bins=rho_bins, r_min=r_min, r_max=r_max)
 
         self.track_wire_dists = self._prepare_track_distances()
-        self.correspondence = self._prepare_wire_track_corresp()
+        self.correspondence = self._prepare_wire_track_correspondence()
 
     def _prepare_track_distances(self):
         """
@@ -93,7 +93,7 @@ class Hough(object):
         if distance >= 0:
             return 1.05 - distance/(self.sig_rho_max - self.sig_rho + 0.1)
 
-    def _prepare_wire_track_corresp(self):
+    def _prepare_wire_track_correspondence(self):
         """
         Defines the probability that a given wire belongs to a track centered at
         a given track center bin
@@ -114,13 +114,13 @@ class Hough(object):
                     corsp[wire, trck] = self.dist_prob(this_dist)
         return corsp
 
-    def get_track_correspondance(self, track_id, values=False):
+    def get_track_correspondence(self, track_id, values=False):
         """
-        Returns the indecies and values of the wires with non-zero
+        Returns the indices and values of the wires with non-zero
         correspondence to track center labeled by track_id
 
         :param values: returns the values as the second return value
-        :return: indecies of the wires with non-zero correspondence, optionally
+        :return: indices of the wires with non-zero correspondence, optionally
                  returns corresponding value
         """
         corr_both = find(self.correspondence[:, track_id])
@@ -131,14 +131,14 @@ class Hough(object):
         else:
             return corr_wire
 
-    def get_wire_correspondance(self, wire_id, values=False):
+    def get_wire_correspondence(self, wire_id, values=False):
         """
-        Returns the indecies and values of the track centers with non-zero
+        Returns the indices and values of the track centers with non-zero
         correspondence to wire labeled by track_id
 
         :param values: if true, returns the correspondence values as the second
                        return value
-        :return: indecies of the wires with non-zero correspondence, optionally
+        :return: indices of the wires with non-zero correspondence, optionally
                  returns corresponding value
         """
         corr_both = find(self.correspondence[wire_id, :])
