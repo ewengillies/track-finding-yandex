@@ -11,7 +11,7 @@ Notation used below:
 """
 
 
-class Array(object):
+class CylindricalArray(object):
     # pylint: disable=too-many-instance-attributes
     # pylint: disable=bad-continuation
     def __init__(self, n_by_layer, r_by_layer, phi0_by_layer):
@@ -39,11 +39,11 @@ class Array(object):
         self.point_lookup = self._prepare_points_lookup()
         self.point_rhos = self._prepare_point_rho()
         self.point_phis = self._prepare_point_phi()
-        self.point_x, self.point_y = self._prepare_point_cartisian()
+        self.point_x, self.point_y = self._prepare_point_cartesian()
         self.point_pol = self._prepare_polarity()
         self.point_dists = self._prepare_point_distances()
         self.point_neighbours, self.lr_neighbours = \
-                self._prepare_point_neighbours()
+            self._prepare_point_neighbours()
 
     def _get_first_point(self):
         """
@@ -96,11 +96,11 @@ class Array(object):
         for lay, layer_size in enumerate(self.n_by_layer):
             for point in range(layer_size):
                 angles[point_0[lay] + point] = (self.phi0_by_layer[lay]
-                                                + self.dphi_by_layer[lay]*point)
+                                                + self.dphi_by_layer[lay] * point)
         angles %= 2 * math.pi
         return angles
 
-    def _prepare_point_cartisian(self):
+    def _prepare_point_cartesian(self):
         """
         Returns the positions of each point in cartesian system
 
@@ -167,7 +167,7 @@ class Array(object):
                     # Find point in adjacent layer closest in phi to
                     # current point
                     # Account for phi0
-                    a_point = rel_pos - (self.phi0_by_layer[a_lay]/(2*math.pi))
+                    a_point = rel_pos - (self.phi0_by_layer[a_lay] / (2 * math.pi))
                     # Find index of adjacent layer point
                     a_point *= a_n_points
                     a_point = round(a_point)
@@ -206,7 +206,7 @@ class Array(object):
         point_0 = self.first_point
         polarity = np.zeros(self.n_points, dtype=float)
         for lay, size in enumerate(self.n_by_layer):
-            polarity[point_0[lay]:point_0[lay] + size] = lay%2
+            polarity[point_0[lay]:point_0[lay] + size] = lay % 2
         return polarity
 
     def get_neighbours(self, point_id):
@@ -292,8 +292,9 @@ class Array(object):
         new_point = self.point_lookup[layer, index]
         return new_point
 
-class CyDet(Array):
-    def __init__(self):
+
+class CyDet(CylindricalArray):
+    def __init__(self, use_default_phis=False):
         """
         Defines the Cylindrical Detector Geometry
         """
@@ -301,23 +302,26 @@ class CyDet(Array):
                        252, 258, 264, 270, 276, 282, 288, 294, 300]
         cydet_radii = [53, 54.6, 56.2, 57.8, 59.4, 61, 62.6, 64.2, 65.8,
                        67.4, 69, 70.6, 72.2, 73.8, 75.4, 77, 78.6, 80.2]
-        # self.phi0_by_layer = [0.00000, 0.015867, 0.015400, 0.000000, 0.014544,
-        #                       0.00000, 0.000000, 0.013426, 0.000000, 0.012771,
-        #                       0.00000, 0.012177, 0.000000, 0.011636, 0.000000,
-        #                       0.00000, 0.000000, 0.010686, 0.000000, 0.010267]
-        cydet_phi0 = [0.015867, 0.0, 0.0, 0.0, 0.0, 0.014960,
-                      0.014960, 0.0, 0.0, 0.0, 0.0, 0.000000,
-                      0.000000, 0.0, 0.0, 0.0, 0.0, 0.000000]
-        Array.__init__(self, cydet_wires, cydet_radii, cydet_phi0)
+        if use_default_phis:
+            cydet_phi0 = [0.015867, 0.0, 0.0, 0.0, 0.0, 0.014960,
+                          0.014960, 0.0, 0.0, 0.0, 0.0, 0.000000,
+                          0.000000, 0.0, 0.0, 0.0, 0.0, 0.000000]
+        else:
+            cydet_phi0 = [0.00000, 0.015867, 0.015400, 0.000000, 0.014544,
+                          0.00000, 0.000000, 0.013426, 0.000000, 0.012771,
+                          0.00000, 0.012177, 0.000000, 0.011636, 0.000000,
+                          0.00000, 0.000000, 0.010686, 0.000000, 0.010267]
+
+        CylindricalArray.__init__(self, cydet_wires, cydet_radii, cydet_phi0)
 
 
-class TrackCenters(Array):
+class TrackCenters(CylindricalArray):
     def __init__(self, r_min=10., r_max=50., rho_bins=10, arc_res=0):
         """
         Defines the geometry of the centers of the potential tracks used in the
         Hough transform.  It is constructed from a minimum radius, maximum
         radius, number of radial layers, and spacial resolution in phi for all
-        layers.  The outer most layer will be at the maximal radius, while the
+        layers. The outer most layer will be at the maximal radius, while the
         inner most will be at the inner most radius.
 
         :param r_min: Radius of inner most layer
@@ -338,4 +342,4 @@ class TrackCenters(Array):
         n_track_cent = [int(round(2 * math.pi * r_track_cent[n] / arc_res))
                         for n in range(rho_bins)]
         phi0_track_cent = [0] * rho_bins
-        Array.__init__(self, n_track_cent, r_track_cent, phi0_track_cent)
+        CylindricalArray.__init__(self, n_track_cent, r_track_cent, phi0_track_cent)
