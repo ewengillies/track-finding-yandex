@@ -55,7 +55,7 @@ class SignalHits(object):
         Returns a vector denoting whether or not a wire has a hit on it. Returns
         1 for a hit, 0 for no hit
 
-        :retun: numpy array of shape [n_wires] whose value is 1 for a hit, 0 for
+        :return: numpy array of shape [n_wires] whose value is 1 for a hit, 0 for
                 no hit
         """
         hit_vector = np.zeros(self.cydet.n_points)
@@ -81,7 +81,7 @@ class SignalHits(object):
         hit on it. Returns 1 for a hit in an odd layer, 0 for no hit and all
         even layers
 
-        :retun: numpy array of shape [n_wires] whose value is 1 for a hit on an
+        :return: numpy array of shape [n_wires] whose value is 1 for a hit on an
                 odd layer, 0 otherwise
         """
         even_wires, odd_wires = self.get_hit_wires_even_odd(event_id)
@@ -166,7 +166,7 @@ class SignalHits(object):
         for wire in hit_wires:
             for shift in [1, -1]:
                 sh_wire = self.cydet.shift_wire(wire, shift)
-                t_metric = abs((t_hits[sh_wire]+1)/(t_hits[wire]+1))
+                t_metric = abs((t_hits[sh_wire] + 1) / (t_hits[wire] + 1))
                 result[wire] += t_metric
         return result
 
@@ -218,27 +218,6 @@ class SignalHits(object):
         bkg_wires = np.where(hit_types == 2)[0]
         return bkg_wires
 
-    def get_prob_sig_wire(self, evt):
-        """
-        Returns an array of probabilities that a wire is a signal wire, based
-        soley on energy deposition
-
-        :return: numpy array of probabilities of signal or not
-        """
-        probability = np.zeros(self.cydet.n_points)
-        # Only look at hit wires, so that all wires with no hits are
-        # automatically zero
-        h_wires = self.get_hit_wires(evt)
-        # Define three signal regions, from highest energy thrshold to lowest
-        #sig_0 = np.where(self.get_energy_deposits(evt)[h_wires] < 0.00001)[0]
-        sig_1 = np.where(self.get_energy_deposits(evt)[h_wires] < 0.000005)[0]
-        #sig_2 = np.where(self.get_energy_deposits(evt)[h_wires] < 0.0000025)[0]
-        # Add 0.3 for every time the wire lands within an energy theshold
-        #probability[sig_0] += 0.3
-        probability[sig_1] += 1.0
-        #probability[sig_2] += 0.3
-        return probability
-
 
 class AllHits(SignalHits):
     def __init__(self, path="../data/signal_TDR.root", tree='tree'):
@@ -250,7 +229,7 @@ class BackgroundHits(object):
     # pylint: disable=too-many-instance-attributes
     # pylint: disable=bad-continuation
     # pylint: disable=relative-import
-    def __init__(self, cydet, path="data/proton_from_muon_capture",
+    def __init__(self, cydet, path="../data/proton_from_muon_capture",
                  tree='tree', hits=1000):
         """
         This generates hit data from a file in which both only background hits
@@ -417,7 +396,7 @@ class BackgroundHits(object):
             # Get the wire_id's of the rotated wires using the sample map
             wire_ids = self._get_new_wire_ids(event_id, event_index)
             # Get the timing of the true hit wires
-            timing = event[self.prefix + "_t"]%1170
+            timing = event[self.prefix + "_t"] % 1170
             # Noting that (timing) and (wire_ids) have corresponding order, open
             # a loop over the wires, noting the index in the wire_ids list
             # itself
@@ -427,6 +406,7 @@ class BackgroundHits(object):
                 if (time_hit[wire] == 0) | (time_hit[wire] > timing[place]):
                     time_hit[wire] = timing[place]
         return time_hit
+
 
 class ResampledHits(object):
     # pylint: disable=too-many-instance-attributes
@@ -508,6 +488,6 @@ class ResampledHits(object):
         :return: numpy.array of shape [CyDet.n_points]
         """
         result = np.zeros(self.cydet.n_points, dtype=int)
-        result[self.get_bkg_wires] = 2
-        result[self.get_sig_wires] = 1
+        result[self.get_bkg_wires(event_id)] = 2
+        result[self.get_sig_wires(event_id)] = 1
         return result.astype(int)
