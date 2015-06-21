@@ -271,7 +271,7 @@ class BackgroundHits(object):
         """
         if self.event_index != event_id:
             # otherwise everything was done previously and cached
-            print "Getting sample {}".format(event_id)
+            #print "Getting sample {}".format(event_id)
             self.this_sample = lil_matrix((self.n_events, self.cydet.n_points),
                                           dtype=np.int16)
             # Seed the random number
@@ -413,7 +413,9 @@ class ResampledHits(object):
     # pylint: disable=bad-continuation
     # pylint: disable=relative-import
     def __init__(self, sig_path="../data/signal.root", sig_tree='tree',
-                 bkg_path="../data/proton_from_muon_capture_bg.root",
+                 bkg_path_1="../data/proton_from_muon_capture_bg.root",
+                 bkg_path_2="../data/muon_neutron_beam_bg.root",
+                 bkg_path_3="../data/other_beam_bg.root",
                  bkg_tree='tree', occupancy=0.10):
         """
         This generates hit data from a file in which both background and signal
@@ -427,11 +429,25 @@ class ResampledHits(object):
 
         self.cydet = CyDet()
         self.sig_hits = SignalHits(self.cydet, path=sig_path, tree=sig_tree)
-        self.bkg_hits = BackgroundHits(self.cydet, path=bkg_path, tree=bkg_tree)
+        self.bkg_hits_1 = BackgroundHits(self.cydet, path=bkg_path_1, tree=bkg_tree)
+        self.bkg_hits_2 = BackgroundHits(self.cydet, path=bkg_path_2, tree=bkg_tree)
+        self.bkg_hits_3 = BackgroundHits(self.cydet, path=bkg_path_3, tree=bkg_tree)
         self.n_events = self.sig_hits.n_events
         self.event_index = 0
         total_bkg_hits = round(occupancy * self.cydet.n_points)
-        self.bkg_hits.n_hits = total_bkg_hits
+        total_avail_bkg = self.bkg_hits_1.n_events +\
+                          self.bkg_hits_2.n_events +\
+                          self.bkg_hits_3.n_events
+        self.bkg_hits_1.n_hits = (total_bkg_hits) *\
+                                 (self.bkg_hits_1.n_events/total_avail_bkg)
+        self.bkg_hits_1.n_hits *= 0.15/0.43
+        self.bkg_hits_1.n_hits = int(self.bkg_hits_1.n_hits)
+        self.bkg_hits_2.n_hits = (total_bkg_hits)\
+                                 * self.bkg_hits_2.n_events/total_avail_bkg
+        self.bkg_hits_2.n_hits = int(self.bkg_hits_2.n_hits)
+        self.bkg_hits_3.n_hits = (total_bkg_hits)\
+                                 * self.bkg_hits_3.n_events/total_avail_bkg
+        self.bkg_hits_3.n_hits = int(self.bkg_hits_3.n_hits)
 
     def get_hit_wires(self, event_id):
         """
@@ -440,8 +456,12 @@ class ResampledHits(object):
         :return: numpy array of hit wires
         """
         sig_wires = self.sig_hits.get_hit_wires(event_id)
-        bkg_wires = self.bkg_hits.get_hit_wires(event_id)
-        wire_ids = np.append(sig_wires, bkg_wires)
+        bkg_1_wires = self.bkg_hits_1.get_hit_wires(event_id)
+        bkg_2_wires = self.bkg_hits_2.get_hit_wires(event_id)
+        bkg_3_wires = self.bkg_hits_3.get_hit_wires(event_id)
+        wire_ids = np.append(sig_wires, bkg_1_wires)
+        wire_ids = np.append(wire_ids, bkg_2_wires)
+        wire_ids = np.append(wire_ids, bkg_3_wires)
         return np.unique(wire_ids)
 
     def get_energy_deposits(self, event_id):
@@ -451,8 +471,10 @@ class ResampledHits(object):
         :return: numpy.array of shape [CyDet.n_points]
         """
         sig_energy = self.sig_hits.get_energy_deposits(event_id)
-        bkg_energy = self.bkg_hits.get_energy_deposits(event_id)
-        energy = sig_energy + bkg_energy
+        bkg_energy_1 = self.bkg_hits_1.get_energy_deposits(event_id)
+        bkg_energy_2 = self.bkg_hits_2.get_energy_deposits(event_id)
+        bkg_energy_3 = self.bkg_hits_3.get_energy_deposits(event_id)
+        energy = sig_energy + bkg_energy_1  + bkg_energy_2 + bkg_energy_3
         return energy
 
     def get_sig_wires(self, event_id):
@@ -473,8 +495,10 @@ class ResampledHits(object):
         :return: numpy array of signal hit wires
         """
         # Signal sample actually also has BG hits in it already
-        bkg_wires = np.append(self.bkg_hits.get_hit_wires(event_id),
-                              self.sig_hits.get_bkg_wires(event_id))
+        bkg_wires = np.append(self.bkg_hits_1.get_hit_wires(event_id),
+                              self.bkg_hits_2.get_hit_wires(event_id))
+        bkg_wires = np.append(bkg_wires, self.bkg_hits_3.get_hit_wires(event_id))
+        bkg_wires = np.append(bkg_wires, self.sig_hits.get_bkg_wires(event_id))
         bkg_wires = set(bkg_wires) - set(self.get_sig_wires(event_id))
         return np.array(list(bkg_wires))
 
@@ -490,4 +514,105 @@ class ResampledHits(object):
         result = np.zeros(self.cydet.n_points, dtype=int)
         result[self.get_bkg_wires(event_id)] = 2
         result[self.get_sig_wires(event_id)] = 1
+        return result.astype(int)
+
+class OnlyBackgroundHits(object):
+    # pylint: disable=too-many-instance-attributes
+    # pylint: disable=bad-continuation
+    # pylint: disable=relative-import
+    def __init__(self, n_events=1000,
+                 bkg_path_1="../data/proton_from_muon_capture_bg.root",
+                 bkg_path_2="../data/muon_neutron_beam_bg.root",
+                 bkg_path_3="../data/other_beam_bg.root",
+                 bkg_tree='tree', occupancy=0.10):
+        """
+        This generates hit data from a file in which both background and signal
+        are included and coded. It assumes the naming convention
+        "CdcCell_"+ variable for all leaves. It over lays its data on the uses
+        the CyDet class to define its geometry.
+
+        :param path: path to rootfile
+        :param tree: name of the tree in root dataset
+        """
+
+        self.cydet = CyDet()
+        self.bkg_hits_1 = BackgroundHits(self.cydet, path=bkg_path_1, tree=bkg_tree)
+        self.bkg_hits_2 = BackgroundHits(self.cydet, path=bkg_path_2, tree=bkg_tree)
+        self.bkg_hits_3 = BackgroundHits(self.cydet, path=bkg_path_3, tree=bkg_tree)
+        self.n_events = n_events
+        self.event_index = 0
+        total_bkg_hits = round(occupancy * self.cydet.n_points)
+        total_avail_bkg = self.bkg_hits_1.n_events +\
+                          self.bkg_hits_2.n_events +\
+                          self.bkg_hits_3.n_events
+        self.bkg_hits_1.n_hits = (total_bkg_hits) *\
+                                float(self.bkg_hits_1.n_events)/total_avail_bkg
+        self.bkg_hits_1.n_hits *= 0.15/0.43
+        self.bkg_hits_1.n_hits = int(self.bkg_hits_1.n_hits)
+        self.bkg_hits_2.n_hits = (total_bkg_hits)\
+                                 * self.bkg_hits_2.n_events/total_avail_bkg
+        self.bkg_hits_2.n_hits = int(self.bkg_hits_2.n_hits)
+        self.bkg_hits_3.n_hits = (total_bkg_hits)\
+                                 * self.bkg_hits_3.n_events/total_avail_bkg
+        self.bkg_hits_3.n_hits = int(self.bkg_hits_3.n_hits)
+
+    def get_hit_wires(self, event_id):
+        """
+        Returns the sequence of wire_ids that register hits in given event
+
+        :return: numpy array of hit wires
+        """
+        bkg_1_wires = self.bkg_hits_1.get_hit_wires(event_id)
+        bkg_2_wires = self.bkg_hits_2.get_hit_wires(event_id)
+        bkg_3_wires = self.bkg_hits_3.get_hit_wires(event_id)
+        wire_ids = np.append(bkg_1_wires, bkg_2_wires)
+        wire_ids = np.append(wire_ids, bkg_3_wires)
+        return np.unique(wire_ids)
+
+    def get_energy_deposits(self, event_id):
+        """
+        Returns energy deposit in all wires
+
+        :return: numpy.array of shape [CyDet.n_points]
+        """
+        bkg_energy_1 = self.bkg_hits_1.get_energy_deposits(event_id)
+        bkg_energy_2 = self.bkg_hits_2.get_energy_deposits(event_id)
+        bkg_energy_3 = self.bkg_hits_3.get_energy_deposits(event_id)
+        energy = bkg_energy_1  + bkg_energy_2 + bkg_energy_3
+        return energy
+
+    def get_sig_wires(self, event_id):
+        """
+        Returns the sequence of wire_ids that register signal hits in
+        given event
+
+        :return: numpy array of signal hit wires
+        """
+        return []
+
+    def get_bkg_wires(self, event_id):
+        """
+        Returns the sequence of wire_ids that register background hits in
+        given event
+
+        :return: numpy array of signal hit wires
+        """
+        # Signal sample actually also has BG hits in it already
+        bkg_wires = np.append(self.bkg_hits_1.get_hit_wires(event_id),
+                              self.bkg_hits_2.get_hit_wires(event_id))
+        bkg_wires = np.append(bkg_wires, self.bkg_hits_3.get_hit_wires(event_id))
+        bkg_wires = set(bkg_wires) - set(self.get_sig_wires(event_id))
+        return np.array(list(bkg_wires))
+
+    def get_hit_types(self, event_id):
+        """
+        Returns hit type in all wires, where signal is 1, background is 2,
+        nothing is 0.  In the case of hit overlap between background an signal,
+        signal is given priority. Note: The signal sample often has a few
+        background hits already, mostly along the track
+
+        :return: numpy.array of shape [CyDet.n_points]
+        """
+        result = np.zeros(self.cydet.n_points, dtype=int)
+        result[self.get_bkg_wires(event_id)] = 2
         return result.astype(int)
