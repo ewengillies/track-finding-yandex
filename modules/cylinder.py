@@ -38,6 +38,7 @@ class CylindricalArray(object):
         self.dphi_by_layer = self._prepare_dphi_by_layer()
         self.point_lookup = self._prepare_points_lookup()
         self.point_rhos = self._prepare_point_rho()
+        self.point_layers = np.round(((self.point_rhos - 53)/1.6)).astype(int)
         self.point_phis = self._prepare_point_phi()
         self.point_x, self.point_y = self._prepare_point_cartesian()
         self.point_pol = self._prepare_polarity()
@@ -96,7 +97,7 @@ class CylindricalArray(object):
         for lay, layer_size in enumerate(self.n_by_layer):
             for point in range(layer_size):
                 angles[point_0[lay] + point] = (self.phi0_by_layer[lay]
-                                                + self.dphi_by_layer[lay] * point)
+                                              + self.dphi_by_layer[lay]*point)
         angles %= 2 * math.pi
         return angles
 
@@ -167,7 +168,7 @@ class CylindricalArray(object):
                     # Find point in adjacent layer closest in phi to
                     # current point
                     # Account for phi0
-                    a_point = rel_pos - (self.phi0_by_layer[a_lay] / (2 * math.pi))
+                    a_point = rel_pos - (self.phi0_by_layer[a_lay]/(2*math.pi))
                     # Find index of adjacent layer point
                     a_point *= a_n_points
                     a_point = round(a_point)
@@ -286,7 +287,7 @@ class CylindricalArray(object):
         layer = self.get_layer(point_id)
         index = self.get_index(point_id)
         n_points_in_layer = self.n_by_layer[layer]
-        shift_size = int(round(shift_frac * n_points_in_layer))
+        shift_size = int(round(shift_frac * (n_points_in_layer-1)))
         index += shift_size
         index %= n_points_in_layer
         new_point = self.point_lookup[layer, index]
@@ -342,4 +343,5 @@ class TrackCenters(CylindricalArray):
         n_track_cent = [int(round(2 * math.pi * r_track_cent[n] / arc_res))
                         for n in range(rho_bins)]
         phi0_track_cent = [0] * rho_bins
-        CylindricalArray.__init__(self, n_track_cent, r_track_cent, phi0_track_cent)
+        CylindricalArray.__init__(self, n_track_cent, r_track_cent, \
+                phi0_track_cent)
