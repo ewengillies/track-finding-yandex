@@ -292,3 +292,103 @@ class HoughTransformer(object):
         # Inverse hough transform
         after_hough = self.normed_corresp.dot(hough_images.T).T
         return after_hough, hough_images
+
+class HoughShifter(object):
+    # pylint: disable=too-many-instance-attributes
+    # pylint: disable=bad-continuation
+    # pylint: disable=no-name-in-module
+    def __init__(self, hough, upper_lim, lower_lim, dphi):
+        """
+        A class that handles shifting the even layers to remove the stereometric
+        effects
+
+        :param hough_matrix:    Hough transform matrix
+        :param track_neighs:    Nearest neighbour matrix for tracks
+        :param min_percentile:  Bottom percentile ignored in hough space
+        :param alpha_rw:        Weight of reweight in hough space
+        :param alpha_max:       Weight of peak reweight in hough space
+        :param regular:         Regularization used to normalize correspondence
+                                matrix
+        """
+        self.hough = hough
+        self.upper_lim = upper_lim
+        self.lower_lim = lower_lim
+        self.dphi = dphi
+        self.phi_slices = self._get_slices(hough)
+        self.shifters = self._get_shifters(hough.hits_data.cydet)
+
+    def _get_slices(self, hough):
+        # Integrate over slices in phi
+        n_phis = np.ceil(2*np.pi/self.dphi).astype(int)
+        prev_slice = np.zeros(0)
+        all_slices = lil_matrix((n_phis, hough.track.n_points))
+        for phi_slice in range(n_phis):
+            # Define phi ranges
+            phi_0 = phi_slice*self.dphi
+            phi_1 = phi_0 + self.dphi
+            # Get the slice you want
+            this_slice = np.where(\
+                    (hough.tracks.point_phis() >= phi_0) &\
+                    (hough.tracks.point_phis() < phi_1))[0]
+            # Avoid double counting a point
+            this_slice = np.setdiff1d(this_slice, prev_slice)
+            prev_slice = this_slice
+            # Add these points to the slice
+            all_slices[phi_slice, this_slice] = 1.
+        # Normalize by the number in each slice to get density in phi
+        return csr_matrix(all_slices / all_slices.sum(axis=1))
+
+    def _shift_wire_ids(self, cydet, wire_shift):
+        return np.array([cydet.shift_wire(wire, shift)\
+                            for wire, shift\
+                            in zip(np.arange(cydet.n_points), wire_shift)])
+
+    def _get_even_shift(self, cydet, phi_shift=2*np.pi/81.):
+        shift_by_layer = np.zeros(len(cydet.dphi_by_layer))
+        shift_by_layer[::2] = -np.round(phi_shift/cydet.dphi_by_layer)[::2]
+        shift_by_layer = shift_by_layer.astype(int)
+        shift_by_wire = np.take(shift_by_layer, cydet.point_layers)
+        forward_index = self._shift_wire_ids(cydet, shift_by_wire)
+        backward_index = np.argsort(forward_index)
+        return forward_index, backward_index
+
+
+    def _get_shifters(self, cydet):
+        phi_range = np.arange(self.lower_lim, self.upper_lim+1)*self.dphi
+        both_shifts = np.dstack(\
+                np.vstack(self._get_even_shift(cydet, phi_shift))\
+                for phi_shift in phi_range)
+        forward_shift = both_shifts[0]
+        backwards_shift = both_shifts[1]
+        return forward_shift.T, backwards_shift.T
+
+    def _get_ideal_shift(self, even_slices, odd_slices):
+        # Find the ideal shift in phi to align images in hough space
+        diff = 1000000
+        ideal_phi = -100
+        for phi_shift in range(self.lower_lim, self.upper_lim+1):
+            new_even_slices = np.roll(even_slices, phi_shift)
+            this_diff = np.sum(np.square(new_even_slices - odd_slices))
+            if this_diff < diff:
+                diff = this_diff
+                ideal_phi = phi_shift
+        return ideal_phi
+
+    def fit_shift(self, to_align):
+        # Get even and odd contributions
+        hough_image_even = to_align[:, :self.hough.track.n_points]
+        hough_image_odd = to_align[:, self.hough.track.n_points:]
+
+        slices_even = self.phi_slices.dot(hough_image_even.T).T
+        slices_odd = self.phi_slices.dot(hough_image_odd.T).T
+        # Find the ideal rotations
+        ideal_rotate = np.array(\
+                [self._get_ideal_shift(slices_even[evt, :], slices_odd[evt, :])\
+                                 for evt in range(to_align.shape[0])])
+        ideal_rotate -= self.lower_lim
+        return ideal_rotate, slices_even, slices_odd
+
+    def shift_result(self, results, ideal_rotate):
+        return np.vstack(evt_res[self.shifters[evt_rot]]\
+                for evt_res, evt_rot in zip(results, ideal_rotate))
+
