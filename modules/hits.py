@@ -1,5 +1,5 @@
-
 import numpy as np
+import numpy.lib.recfunctions
 from root_numpy import root2array
 from cylinder import CyDet
 from random import Random
@@ -12,13 +12,13 @@ Notation used below:
  - wire_index is the index of wire in the layer
 """
 
-# TODO Impliment flat hits_data as in CTH case
-
 class FlatHits(object):
     # pylint: disable=too-many-instance-attributes
     # pylint: disable=bad-continuation
     def __init__(self, path="../data/151208_SimChen_noise.root",
-                 treename='tree', prefix=["M"], branches=["M_edep"]):
+                 tree='tree', prefix="CdcCell", branches=None,
+                 hit_type_name="hittype", n_hits_name="nHits",
+                 signal_coding=1, build_record=True, finalize_data=True):
         """
         Dataset provides an interface to work with MC stored in root format.
         Results of methods are either numpy.arrays or scipy.sparse objects.
@@ -28,68 +28,180 @@ class FlatHits(object):
         Additionally, all geometry IDs are flattened from [row][id] to [flat_id]
 
         :param path: path to rootfile
-        :param treename: name of the tree in root dataset
+        :param tree: name of the tree in root dataset
+        :param branches: branches from root file to import defined for each hit
+        :param evt_branches: branches from root file to import defined for each
+                             event
+        :param hit_type_name: name of the branch that determines hit type
+        :param n_hit_name: name of branch that gives the number of hits in each
+                           event
+        :param signal_coding: value in hit_type_name branch that signifies a
+                              signal hit.  Default is 1
         """
-        # Initialize our data and look up tables
+        # Assumptions about data naming and signal labelling conventions
         self.prefix = prefix + "_"
-        self.n_hits_name = self.prefix + "nHits"
+        self.n_hits_name = self.prefix + n_hits_name
+        self.hit_type_name = self.prefix + hit_type_name
+        self.signal_coding = signal_coding
+
+        # Deal with requested branches
+        # Ensure branches are given as list
+        if branches is None:
+            branches = []
+        if not isinstance(branches, list):
+            branches = [branches]
+        # Append the prefix if it is not provided
+        branches = [self.prefix + branch
+                    if not branch.startswith(self.prefix)
+                    else branch
+                    for branch in branches]
+        # Ensure hit type is imported in branches
+        if self.hit_type_name not in branches:
+            branches += [self.hit_type_name]
+
+        # Set the number of hits, the number of events, and data to None so that
+        # the the next import_root_file knows its the first call
+        self.n_hits, self.n_events, self.data = (None, None, None)
+
+        # Initialize our data and look up tables
         self.hits_to_events, self.event_to_hits, self.event_to_n_hits =\
-            self._get_event_to_hits_lookup(path, treename=treename)
+            self._get_event_to_hits_lookup(path, tree=tree)
 
         # Set the number of hits and events for this data
         self.n_hits = len(self.hits_to_events)
         self.n_events = len(self.event_to_n_hits)
 
-        # Get the geometry flat_IDs
-        geom_name, geom_row = self._get_geom_flat_ids(path, treename=treename)
-
         # Get the hit data we want
-        data_names, data_rows = self._get_data(path, treename=treename,
+        if not branches is None:
+            data_columns = self._import_root_file(path, tree=tree,
                                                branches=branches)
+        # Default to empty list
+        else:
+            data_columns = []
 
         # Label each hit with the number of hits in its event
-        all_n_hits_row = [self.event_to_n_hits[self.hits_to_events]]
+        all_n_hits_column = [self.event_to_n_hits[self.hits_to_events]]
 
         # Index each hit
-        self.hits_index_name = "hits_index"
-        hits_index_row = [np.arange(self.n_hits)]
+        self.hits_index_name = self.prefix + "hits_index"
+        hits_index_column = [np.arange(self.n_hits)]
 
         # Zip it all together in a record array
-        all_names = geom_name + data_names\
-                  + [self.n_hits_name] + [self.hits_index_name]
-        all_rows = geom_row + data_rows + all_n_hits_row + hits_index_row
-        self.hits_data = np.rec.fromarrays(all_rows, names=(all_names))
+        self.all_branches = branches + [self.n_hits_name] +\
+                                       [self.hits_index_name]
+        self.data = data_columns + all_n_hits_column + hits_index_column
 
-        # Sort the data by time by default if it is included
-        truth_time = self.prefix + "t"
-        if truth_time in branches:
-            print "Time sorted the hits in each event"
-            self.sort_hits(truth_time)
+        # Finialize the data if this is the final form
+        if finalize_data:
+            self._finalize_data()
 
-    def _get_names_flat_ids_lookups(self, n_vol_rows=6, n_vol_index=64):
+    def _finalize_data(self):
         """
-        Creates a lookup table to map from [volRow][volID] to a flattened
-        volRow and flattend volID, and from flattened ID to (volRow, volID)
+        Zip up the data into a rec array if this is the highest level class of
+        this instance
         """
-        # Build the mapping from row and index to flattened IDs
-        row_index_to_flat = [np.arange(n*n_vol_index, (n+1)*n_vol_index)\
-                             for n in range(n_vol_rows)]
-        row_index_to_flat = np.vstack(row_index_to_flat)
-        # Initialize the lookup table for flattened ID to (row, index)
-        flat_id_to_row_index = []
-        for row in n_vol_rows:
-            for idx in range(n_vol_index):
-                flat_id_to_row_index.append((row, idx))
-        return row_index_to_flat, flat_id_to_row_index
+        self.data = np.rec.fromarrays(self.data, names=(self.all_branches))
+
+    def print_branches(self):
+        """
+        Print the names of the data available once you are done
+        """
+        # Print status message
+        print "Branches available are:"
+        print "\n".join(self.all_branches)
+
+    def _check_for_branches(self, path, tree, branches):
+        """
+        This checks for the needed branches before they are imported to avoid
+        the program to hang without any error messages
+
+        :param path: path to root file
+        :param tree: name of tree in root file
+        :param branches: required branches
+        """
+        # Import one event with all the branches to get the names of the
+        # branches
+        dummy_root = root2array(path, treename=tree, start=0, stop=1)
+        # Get the names of the imported branches
+        availible_branches = dummy_root.dtype.names
+        # Get the requested branches that are not availible
+        bad_branches = list(set(branches) - set(availible_branches))
+        # Check that this is zero in length
+        assert len(bad_branches) == 0, "ERROR: The requested branches:\n"+\
+                "\n".join(bad_branches) + "\n are not availible"
+
+    def _import_root_file(self, path, tree, branches):
+        """
+        This wraps root2array to protect the user from importing non-existant
+        branches, which cause the program to hang without any error messages
+
+        :param path: path to root file
+        :param tree: name of tree in root file
+        :param branches: required branches
+        """
+        # Ensure branches is a list
+        if not isinstance(branches, list):
+            branches = [branches]
+        # Check that these branches do not already exist locally
+        if self.data is not None:
+            get_branches = list(set(branches) - set(self.all_branches))
+            had_branches = list(set(branches) - set(get_branches))
+            # Print a warning if branches have been requested multiple times
+            had_branches = "\n".join(had_branches)
+            if len(had_branches) != 0:
+                print "Warning : Branches " + had_branches + " \n already "+\
+                      "exist locally.  These will not be imported again."
+        else:
+            get_branches = branches
+        # Check the braches we want are there
+        self._check_for_branches(path, tree, get_branches)
+        # Grab the branches one by one to save on memory
+        data_columns = []
+        for branch in get_branches:
+            # Grab the branch
+            event_data = root2array(path, treename=tree,\
+                                    branches=[branch])
+            # If we know the number of hits and events, require the branch is as
+            # long as one of these
+            if (self.n_hits is not None) and (self.n_events is not None):
+                # Concatonate the branch if it is an array of lists, i.e. if it
+                # is defined for every hit
+                if event_data.dtype[branch] == object:
+                    event_data = np.concatenate(event_data[branch])
+                    # Check that the right number of hits are defined
+                    data_length = len(event_data)
+                # Otherwise assume it is defined event-wise, stretch it by event
+                # so each hit has the value corresponding to its event.
+                else:
+                    # Check the length
+                    data_length = len(event_data)
+                    event_data = event_data[branch][self.hits_to_events]
+                # Check that the length of the array makes sense
+                assert (data_length == self.n_hits) or\
+                       (data_length == self.n_events),\
+                       "ERROR: The length of the data in the requested "+\
+                       "branch " + branch + " is not the length of the "+\
+                       "number of events or the number of hits"
+                # Add this branch
+                data_columns.append(event_data)
+            # If we do not know the number of hits and events, assume its
+            # defined hit-wise
+            else:
+                data_columns.append(np.concatenate(event_data[branch]))
+        # Return
+        return data_columns
 
 
-    def _get_event_to_hits_lookup(self, path, treename):
+
+    def _get_event_to_hits_lookup(self, path, tree):
         """
         Creates look up tables to map from events to hits index and from
         hit to event number
         """
+        # Check the branch we need to define the number of hits is there
+        self._check_for_branches(path, tree, branches=[self.n_hits_name])
         # Import the data
-        event_data = root2array(path, treename=treename,\
+        event_data = root2array(path, treename=tree,
                                 branches=[self.n_hits_name])
         # Initialize a look up table that maps from hit number to event number
         hits_to_events = np.zeros(sum(event_data[self.n_hits_name]))
@@ -117,48 +229,6 @@ class FlatHits(object):
         # Return the lookup tables
         return hits_to_events, event_to_hits, event_to_n_hits
 
-    def _get_geom_flat_ids(self, path, treename, flatID_name="flat_volID"):
-        """
-        Labels each hit by flattened geometry ID to replace the use of volName
-        and volID
-        """
-        # Variables that index the geometry
-        geom_var = ["M_volName", "M_volID"]
-        # Import the data
-        event_data = root2array(path, treename=treename,\
-                                branches=geom_var)
-
-        # Flatten the volume names and IDs to flat_voldIDs
-        # Create a dictionary to map from name to lower flatID
-        names_to_lowers = dict(zip(self.volume_names, np.arange(6)*64))
-        # Assign the flatIDs for each hit
-        flat_ids = np.zeros(self.n_hits)
-        for name, vol_id, hit in zip(np.concatenate(event_data[geom_var[0]]),\
-                                     np.concatenate(event_data[geom_var[1]]),\
-                                     range(self.n_hits)):
-            flat_ids[hit] = names_to_lowers[name] + vol_id
-        # Save this column and name it
-        flatID_row = flat_ids.astype(int)
-
-        # Return
-        return [flatID_name], [flatID_row]
-
-    def _get_data(self, path, treename, branches):
-        """
-        Flattens the needed hit data into rows, one row for each variable
-        """
-        # Import the data
-        event_data = root2array(path, treename=treename,\
-                                branches=branches)
-
-        # Flatten each variable into a row of all hits and name the rows
-        data_rows = []
-        for hit_var in branches:
-            data_rows.append(np.concatenate(event_data[hit_var]))
-
-        # Return
-        return branches, data_rows
-
     def sort_hits(self, variable, ascending=True, reset_index=True):
         """
         Sorts the hits by the given variable inside each event.  By default,
@@ -169,15 +239,15 @@ class FlatHits(object):
             # Get the hits to sort
             evt_hits = self.event_to_hits[evt]
             # Get the sort order of the given variable
-            sort_order = self.hits_data[evt_hits][variable].argsort()
+            sort_order = self.data[evt_hits][variable].argsort()
             # Reverse the order if required
             if ascending == False:
                 sort_order = sort_order[::-1]
             # Rearrange the hits
-            self.hits_data[evt_hits] = self.hits_data[evt_hits][sort_order]
+            self.data[evt_hits] = self.data[evt_hits][sort_order]
         # Reset the hit index
         if reset_index == True:
-            self.hits_data[self.hits_index_name] = np.arange(self.n_hits)
+            self.data[self.hits_index_name] = np.arange(self.n_hits)
 
     def get_events(self, events=None, unique=True):
         """
@@ -187,7 +257,7 @@ class FlatHits(object):
         """
         # Check if we want all events
         if events is None:
-            return self.hits_data
+            return self.data
         # Allow for a single event
         if isinstance(events, int):
             evt_hits = self.event_to_hits[events]
@@ -200,14 +270,17 @@ class FlatHits(object):
             evt_hits = np.concatenate([self.event_to_hits[evt]\
                                        for evt in events])
         # Return the data for these events
-        return self.hits_data[evt_hits]
+        return self.data[evt_hits]
 
-    def _filter_hits(self, selected_hits, variable, values):
+    def filter_hits(self, selected_hits, variable, values, invert=False):
         """
         Returns the section of the data where the variable equals
         any of the values
         """
-        mask = np.in1d(selected_hits[variable], values)
+        # Switch to a list if a single value is given
+        if not isinstance(values, list):
+            values = [values]
+        mask = np.in1d(selected_hits[variable], values, invert=invert)
         return selected_hits[mask]
 
     def get_other_hits(self, hits):
@@ -218,19 +291,15 @@ class FlatHits(object):
         events = np.unique(events)
         return self.get_events(events)
 
-    def get_signal_hits(self, events=None, include_secondaries=True):
+    def get_signal_hits(self, events=None):
         """
         Returns the hits from the same event(s) as the given hit list.
         Default gets hits from all events.
         """
         # Get the events
         these_hits = self.get_events(events)
-        # Check if we want to include hits from secondaries from the event
-        if include_secondaries == True:
-            sig_type = [1,2]
-        else:
-            sig_type = [1]
-        these_hits = self._filter_hits(these_hits, "M_hittype", sig_type)
+        these_hits = self.filter_hits(these_hits, self.hit_type_name,
+                                      self.signal_coding)
         return these_hits
 
     def get_background_hits(self, events=None):
@@ -239,54 +308,141 @@ class FlatHits(object):
         Default gets hits from all events.
         """
         these_hits = self.get_events(events)
-        these_hits = self._filter_hits(these_hits, "M_hittype", [-4,-3,-2,-1,0,3])
+        these_hits = self.filter_hits(these_hits, self.hit_type_name,
+                                      self.signal_coding, invert=True)
         return these_hits
 
-class SignalHits(object):
+class GeomHits(FlatHits):
     # pylint: disable=too-many-instance-attributes
     # pylint: disable=bad-continuation
     # pylint: disable=relative-import
-    def __init__(self, cydet, version=1,
-                 path="../data/signal.root", tree='tree',
-                 signal_hits_only=False):
+    # pylint: disable=unbalanced-tuple-unpacking
+    def __init__(self, path="../data/signal.root", tree='tree',
+                 branches=None, prefix="CdcCell", hit_type_name="hittype",
+                 n_hits_name="nHits", row_name="layerID", idx_name="cellID",
+                 edep_name="edep", time_name="t", flat_name="vol_id",
+                 signal_coding=1, geom=CyDet(), finalize_data=True):
         """
-        This generates hit data from a file in which both background and signal
-        are included and coded. It assumes the naming convention
-        "CdcCell_"+ variable for all leaves. It over lays its data on the uses
-        the CyDet class to define its geometry.
+        This generates hit data in a structured array from an input root file
+        from a file. It assumes that the hits are associated to some geometrical
+        structure, which is organized by row and index.
 
         :param path: path to rootfile
-        :param version: Version of SimChen data we are using
         :param tree: name of the tree in root dataset
+        :param branches: branches from root file to import
+        :param hit_type_name: name of the branch that determines hit type
+        :param n_hit_name: name of branch that gives the number of hits in each
+                           event
+        :param signal_coding: value in hit_type_name branch that signifies a
+                              signal hit
         """
+        FlatHits.__init__(self, path=path, tree=tree, prefix=prefix,
+                          branches=branches, hit_type_name=hit_type_name,
+                          n_hits_name=n_hits_name, signal_coding=signal_coding,
+                          finalize_data=False)
 
-        self.data = root2array(path, treename=tree)
-        self.cydet = cydet
-        self.prefix = "CdcCell"
-        self.n_events = len(self.data)
-        self.version = version
-        # TODO fix this
-        self.signal_hits_only = signal_hits_only
+        # Get the geometry flat_IDs
+        self.row_name = self.prefix + row_name
+        self.idx_name = self.prefix + idx_name
+        self.flat_name = self.prefix + flat_name
 
-    def get_hit_wires(self, event_id):
+        # Get the geometry of the detector
+        self._geom = geom
+
+        # Build the flattened ID row
+        geom_column = self._get_geom_flat_ids(path, tree=tree)
+
+        # Add these data to the data list
+        self.data.append(geom_column)
+        self.all_branches.append(self.flat_name)
+
+        # Define the names of the time and energy depostition columns
+        self.edep_name = self.prefix + edep_name
+        self.time_name = self.prefix + time_name
+
+        # Import these, noting this will be ignored if they already exist
+        edep_column = self._import_root_file(path, tree=tree,
+                                             branches=[self.edep_name])
+        time_column = self._import_root_file(path, tree=tree,
+                                             branches=[self.time_name])
+
+        # Add these data to the data list
+        self.data += edep_column
+        self.data += time_column
+        self.all_branches.append(self.edep_name)
+        self.all_branches.append(self.time_name)
+
+        # Finialize the data if this is the final form
+        if finalize_data:
+            self._finalize_data()
+
+    def _finalize_data(self):
         """
-        Returns the sequence of wire_ids that register hits in given event
+        Zip up the data into a rec array if this is the highest level class of
+        this instance and sort by time
+        """
+        self.data = np.rec.fromarrays(self.data, names=self.all_branches)
+        self.sort_hits(self.time_name)
+
+    def _get_geom_flat_ids(self, path, tree):
+        """
+        Labels each hit by flattened geometry ID to replace the use of volume
+        row and volume index
+        """
+        # Import the data
+        row_data, idx_data = self._import_root_file(path, tree=tree,
+                                                    branches=[self.row_name,
+                                                              self.idx_name])
+        # Flatten the volume names and IDs to flat_voldIDs
+        flat_ids = np.zeros(self.n_hits)
+        for row, idx, hit in zip(row_data, idx_data, range(self.n_hits)):
+            flat_ids[hit] = self._geom.point_lookup[row, idx]
+        # Save this column and name it
+        flat_id_column = flat_ids.astype(int)
+        return flat_id_column
+
+    def get_hit_vols(self, event_id, unique=True):
+        """
+        Returns the sequence of flat_ids that register hits in given event
 
         :return: numpy array of hit wires
         """
         # Select the relevant event from data
-        event = self.data[event_id]
-        # Recover an ordered list of wire_index and corresponding wire_ids
-        wire_index = event[self.prefix + "_cellID"]
-        layer_ids = event[self.prefix + "_layerID"]
-        # Flatten these into the point_ids from the cydet
-        wire_ids = self.cydet.point_lookup[layer_ids, wire_index]
-        assert np.all(wire_ids >= 0), \
-            'Wrong id of wire here {} {}'.format(layer_ids[wire_ids < 0],
-                                                 wire_index[wire_ids < 0])
-        return wire_ids
+        flat_ids = self.get_events(event_id)[self.flat_name]
+        if unique is True:
+            flat_ids = np.unique(flat_ids)
+        # TODO fix this error message
+        #assert np.all(flat_ids >= 0), \
+        #    'Wrong id of wire here {} {}'.format(layer_ids[wire_ids < 0],
+        #                                         self._geom.get)
+        return flat_ids
 
-    def get_hit_vector(self, event_id):
+    def get_sig_vols(self, event_id, unique=True):
+        """
+        Returns the sequence of flat_ids that register signal hits in given
+        event
+
+        :return: numpy array of hit wires
+        """
+        # Select the relevant event from data
+        sig_vols = self.get_signal_hits(event_id)[self.flat_name]
+        if unique is True:
+            sig_vols = np.unique(sig_vols)
+        return sig_vols
+
+    def get_bkg_vols(self, event_id, unique=True):
+        """
+        Returns the sequence of flat_ids that register hits in given event
+
+        :return: numpy array of hit wires
+        """
+        # Select the relevant event from data
+        bkg_vols = self.get_background_hits(event_id)[self.flat_name]
+        if unique is True:
+            bkg_vols = np.unique(bkg_vols)
+        return bkg_vols
+
+    def get_hit_vector(self, event_id, unique=True):
         """
         Returns a vector denoting whether or not a wire has a hit on it. Returns
         1 for a hit, 0 for no hit
@@ -294,9 +450,101 @@ class SignalHits(object):
         :return: numpy array of shape [n_wires] whose value is 1 for a hit, 0
                  for no hit
         """
-        hit_vector = np.zeros(self.cydet.n_points)
-        hit_vector[self.get_hit_wires(event_id)] = 1
+        # Get the flat vol IDs for those with hits
+        hit_vols = self.get_hit_vols(event_id, unique=True)
+        # Make the hit vector
+        hit_vector = np.zeros(self._geom.n_points)
+        hit_vector[hit_vols] = 1
         return hit_vector
+
+    def get_hit_types(self, event_id, unique=True):
+        """
+        Returns hit type in all volumes, where signal is 1, background is 2,
+        nothing is 0.  If signal and background are both incident, signal takes
+        priority
+
+        :return: numpy.array of shape [CyDet.n_points]
+        """
+        result = np.zeros(self._geom.n_points, dtype=int)
+        # Get the background hits
+        bkg_hits = np.unique(self.get_background_hits(event_id)[self.flat_name])
+        result[bkg_hits] = 2
+        # Get the signal hits
+        sig_hits = np.unique(self.get_signal_hits(event_id)[self.flat_name])
+        result[sig_hits] = 1
+        return result.astype(int)
+
+    def get_measurement(self, event_id, name):
+        """
+        Returns requested measurement in volumes, returning zero if the volume
+        does not register this measurement
+
+        :return: numpy.array of shape [CyDet.n_points]
+        """
+        result = np.zeros(self._geom.n_points, dtype=float)
+        # Select the relevant event from data
+        meas = self.get_events(event_id)[name]
+        # Get the wire_ids of the hit data
+        wire_ids = self.get_hit_vols(event_id, unique=False)
+        # Add the measurement to the correct cells in the result
+        result[wire_ids] += meas
+        return result
+
+    def get_energy_deposits(self, event_id):
+        """
+        Returns energy deposit in all wires
+
+        :return: numpy.array of shape [CyDet.n_points]
+        """
+        energy_deposit = self.get_measurement(event_id, self.edep_name)
+        return energy_deposit
+
+    def get_hit_time(self, event_id):
+        """
+        Returns the timing of the hit
+
+        :return: numpy.array of shape [CyDet.n_points]
+        """
+        time_hit = self.get_measurement(event_id, self.time_name)
+        return time_hit
+
+
+class CyDetHits(GeomHits):
+    # pylint: disable=too-many-instance-attributes
+    # pylint: disable=bad-continuation
+    # pylint: disable=relative-import
+    def __init__(self, path="../data/signal.root", tree='tree', branches="mt",
+                 prefix="CdcCell", hit_type_name="hittype", n_hits_name="nHits",
+                 row_name="layerID", idx_name="cellID", flat_name="vol_id",
+                 time_name="tstart", edep_name="edep", signal_coding=1,
+                 finalize_data=True):
+        """
+        This generates hit data in a structured array from an input root file
+        from a file. It assumes the naming convention "CdcCell_"+ variable for
+        all leaves. It overlays its data on the uses the CyDet class to define
+        its geometry.
+
+        :param path: path to rootfile
+        :param tree: name of the tree in root dataset
+        :param branches: branches from root file to import
+        :param hit_type_name: name of the branch that determines hit type
+        :param n_hit_name: name of branch that gives the number of hits in each
+                           event
+        :param signal_coding: value in hit_type_name branch that signifies a
+                              signal hit
+        """
+        GeomHits.__init__(self, path=path, tree=tree,
+                          branches=branches, prefix="CdcCell",
+                          hit_type_name=hit_type_name, n_hits_name=n_hits_name,
+                          row_name=row_name, idx_name=idx_name,
+                          time_name=time_name, edep_name=edep_name,
+                          flat_name=flat_name, signal_coding=signal_coding,
+                          geom=CyDet(), finalize_data=False)
+        self.cydet = self._geom
+
+        # Finialize the data if this is the final form
+        if finalize_data:
+            self._finalize_data()
 
     def get_hit_wires_even_odd(self, event_id):
         """
@@ -305,8 +553,8 @@ class SignalHits(object):
 
         :return: numpy array of hit wires
         """
-        hit_wires = self.get_hit_wires(event_id)
-        odd_wires = np.where((self.cydet.point_pol == 1))[0]
+        hit_wires = self.get_hit_vols(event_id)
+        odd_wires = np.where((self._geom.point_pol == 1))[0]
         even_hit_wires = np.setdiff1d(hit_wires, odd_wires, assume_unique=True)
         odd_hit_wires = np.intersect1d(hit_wires, odd_wires, assume_unique=True)
         return even_hit_wires, odd_hit_wires
@@ -327,10 +575,142 @@ class SignalHits(object):
         odd_hit_vector[odd_wires] = 1
         return even_hit_vector, odd_hit_vector
 
+    def get_hit_time(self, event_id):
+        """
+        Returns the timing of the hit
+
+        :return: numpy.array of shape [CyDet.n_points]
+        """
+        time_hit = self.get_measurement(event_id, self.prefix + "tstart")
+        return time_hit
+
+    def get_trigger_time(self, event_id):
+        """
+        Returns the timing of the trigger on an event
+
+        :return: numpy.array of shape [CyDet.n_points]
+        """
+        # Check the trigger time has been set
+        assert "CdcCell_mt" in self.all_branches,\
+                "Trigger time has not been set yet"
+        return self.get_measurement(event_id, self.prefix + "mt")
+
+    def get_relative_time(self, event_id):
+        """
+        Returns the difference between the start time of the hit and the time of
+        the trigger.  This value is capped to the time window of 1170 ns
+        :return: numpy array of (t_start_hit - t_trig)%1170
+        """
+        trig_time = self.get_trigger_time(event_id)
+        hit_time = self.get_hit_time(event_id)
+        return hit_time - trig_time
+
+### DEPRECIATED METHODS INCLUDED FOR BACKWARDS COMPATIBILITY ###
+
+    def get_sig_wires(self, event_id):
+        """
+        Get all the signal wires in a given event.  This method is depreciated
+        and simply wraps get_sig_vols
+        """
+        return self.get_sig_vols(event_id)
+
+    def get_bkg_wires(self, event_id):
+        """
+        Get all the background wires in a given event.  This method is
+        depreciated and simply wraps get_bkg_vols
+        """
+        return self.get_bkg_vols(event_id)
+
+    def get_hit_wires(self, event_id):
+        """
+        Get all the hit wires in a given event.  This method is depreciated
+        and simply wraps get_hit_vols
+        """
+        return self.get_hit_vols(event_id)
+
+class SignalHits(object):
+    # pylint: disable=too-many-instance-attributes
+    # pylint: disable=bad-continuation
+    # pylint: disable=relative-import
+    def __init__(self, cydet, version=1,
+                 path="../data/signal.root", tree='tree',
+                 signal_hits_only=False):
+        """
+        This generates hit data from a file in which both background and signal
+        are included and coded. It assumes the naming convention
+        "CdcCell_"+ variable for all leaves. It over lays its data on the uses
+        the CyDet class to define its geometry.
+        :param path: path to rootfile
+        :param version: Version of SimChen data we are using
+        :param tree: name of the tree in root dataset
+        """
+
+        self.data = root2array(path, treename=tree)
+        self.cydet = cydet
+        self.prefix = "CdcCell"
+        self.n_events = len(self.data)
+        self.version = version
+        # TODO fix this
+        self.signal_hits_only = signal_hits_only
+
+    def get_hit_wires(self, event_id):
+        """
+        Returns the sequence of wire_ids that register hits in given event
+        :return: numpy array of hit wires
+        """
+        # Select the relevant event from data
+        event = self.data[event_id]
+        # Recover an ordered list of wire_index and corresponding wire_ids
+        wire_index = event[self.prefix + "_cellID"]
+        layer_ids = event[self.prefix + "_layerID"]
+        # Flatten these into the point_ids from the cydet
+        wire_ids = self.cydet.point_lookup[layer_ids, wire_index]
+        assert np.all(wire_ids >= 0), \
+            'Wrong id of wire here {} {}'.format(layer_ids[wire_ids < 0],
+                                                 wire_index[wire_ids < 0])
+        return wire_ids
+
+    def get_hit_vector(self, event_id):
+        """
+        Returns a vector denoting whether or not a wire has a hit on it. Returns
+        1 for a hit, 0 for no hit
+        :return: numpy array of shape [n_wires] whose value is 1 for a hit, 0
+                 for no hit
+        """
+        hit_vector = np.zeros(self.cydet.n_points)
+        hit_vector[self.get_hit_wires(event_id)] = 1
+        return hit_vector
+
+    def get_hit_wires_even_odd(self, event_id):
+        """
+        Returns two sequences of wire_ids that register hits in given event, the
+        first is only in even layers, the second is only in odd layers
+        :return: numpy array of hit wires
+        """
+        hit_wires = self.get_hit_wires(event_id)
+        odd_wires = np.where((self.cydet.point_pol == 1))[0]
+        even_hit_wires = np.setdiff1d(hit_wires, odd_wires, assume_unique=True)
+        odd_hit_wires = np.intersect1d(hit_wires, odd_wires, assume_unique=True)
+        return even_hit_wires, odd_hit_wires
+
+    def get_hit_vector_even_odd(self, event_id):
+        """
+        Returns a vector denoting whether or not a wire on an odd layer has a
+        hit on it. Returns 1 for a hit in an odd layer, 0 for no hit and all
+        even layers
+        :return: numpy array of shape [n_wires] whose value is 1 for a hit on an
+                odd layer, 0 otherwise
+        """
+        even_wires, odd_wires = self.get_hit_wires_even_odd(event_id)
+        even_hit_vector = np.zeros(self.cydet.n_points)
+        even_hit_vector[even_wires] = 1
+        odd_hit_vector = np.zeros(self.cydet.n_points)
+        odd_hit_vector[odd_wires] = 1
+        return even_hit_vector, odd_hit_vector
+
     def get_measurement(self, event_id, name):
         """
         Returns requested measurement in all wires in requested event
-
         :return: numpy.array of shape [CyDet.n_points]
         """
         result = np.zeros(self.cydet.n_points, dtype=float)
@@ -347,7 +727,6 @@ class SignalHits(object):
     def get_energy_deposits(self, event_id):
         """
         Returns energy deposit in all wires
-
         :return: numpy.array of shape [CyDet.n_points]
         """
         energy_deposit = self.get_measurement(event_id, self.prefix + "_edep")
@@ -356,7 +735,6 @@ class SignalHits(object):
     def get_hit_time(self, event_id):
         """
         Returns the timing of the hit
-
         :return: numpy.array of shape [CyDet.n_points]
         """
         time_hit = self.get_measurement(event_id, self.prefix + "_tstart")
@@ -365,7 +743,6 @@ class SignalHits(object):
     def get_trigger_time(self, event_id):
         """
         Returns energy deposit in all wires
-
         :return: numpy.array of shape [CyDet.n_points]
         """
         event = self.data[event_id]
@@ -378,7 +755,6 @@ class SignalHits(object):
         """
         Returns the difference between the start time of the hit and the time of
         the trigger.  This value is capped to the time window of 1170 ns
-
         :return: numpy array of (t_start_hit - t_trig)%1170
         """
         trig_time = self.get_trigger_time(event_id)
@@ -392,7 +768,6 @@ class SignalHits(object):
         left-right neighbouring hits, large for hits who's neighbouring hits
         happen at a very different times, and small for cells whose neighbours
         happen at a very close time
-
         :return: numpy array non-physical measure of how close in time
                  LR neighbouring hits are
         """
@@ -410,7 +785,6 @@ class SignalHits(object):
         """
         Returns hit type in all wires, where signal is 1, background is 2,
         nothing is 0
-
         :return: numpy.array of shape [CyDet.n_points]
         """
         result = np.zeros(self.cydet.n_points, dtype=int)
@@ -448,7 +822,6 @@ class SignalHits(object):
         """
         Returns the sequence of wire_ids that register signal hits in
         given event
-
         :return: numpy array of signal hit wires
         """
         # Get all hit wires
@@ -461,7 +834,6 @@ class SignalHits(object):
         """
         Returns the sequence of wire_ids that register background hits in
         given event
-
         :return: numpy array of signal hit wires
         """
         # Get all hit wires
@@ -473,7 +845,7 @@ class SignalHits(object):
 
 class AllHits(SignalHits):
     def __init__(self, path="../data/signal_TDR.root", tree='tree', version=1,
-            signal_hits_only=False):
+                 signal_hits_only=False):
         cydet = CyDet()
         SignalHits.__init__(self, cydet, version, path, tree,
                             signal_hits_only=signal_hits_only)
