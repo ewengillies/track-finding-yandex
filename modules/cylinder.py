@@ -10,7 +10,6 @@ Notation used below:
  - point_index is the index of point in the layer
 """
 
-
 class CylindricalArray(object):
     # pylint: disable=too-many-instance-attributes
     # pylint: disable=bad-continuation
@@ -315,6 +314,43 @@ class CyDet(CylindricalArray):
 
         CylindricalArray.__init__(self, cydet_wires, cydet_radii, cydet_phi0)
 
+class CTH(CylindricalArray):
+    def __init__(self, left_handed=True):
+        """
+        Defines the CTH geometry.  Note Cherenkov counter and light guide read
+        out to the same volume here
+        """
+        self.left_handed = left_handed
+        self.n_crystals = 64
+        cth_n_vols = [self.n_crystals, self.n_crystals]
+        cth_radii = [45, 48.5]
+        cth_phi0 = [0., 0.]
+        CylindricalArray.__init__(self, cth_n_vols, cth_radii, cth_phi0)
+
+        # Store the volume names
+        self.chrn_name = "TriChe"
+        self.chlg_name = "TriCheL"
+        self.scnt_name = "TriSci"
+        self.vol_names = [self.chrn_name, self.chlg_name, self.scnt_name]
+
+
+        # Map the upstream and downstream names to row indexes
+        self.name_to_row = dict()
+        self.name_to_row[self.chrn_name] = 0
+        self.name_to_row[self.scnt_name] = 1
+        # Map the light guide volumes to the cherenkov volumes
+        self.name_to_row[self.chlg_name] =\
+                self.name_to_row[self.chrn_name]
+
+    def _prepare_dphi_by_layer(self):
+        """
+        Returns the phi separation of the points as defined by the number of
+        points in the layer
+        """
+        if self.left_handed:
+            return -2 * math.pi / np.asarray(self.n_by_layer)
+        else:
+            return 2 * math.pi / np.asarray(self.n_by_layer)
 
 class TrackCenters(CylindricalArray):
     def __init__(self, r_min=10., r_max=50., rho_bins=10, arc_res=0):
