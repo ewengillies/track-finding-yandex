@@ -302,17 +302,20 @@ class FlatHits(object):
         Returns the section of the data where the variable equals
         any of the values
         """
-        # Switch to a list if a single value is given
-        if not isinstance(values, list):
-            values = [values]
         # Default is all true
         mask = np.ones(len(these_hits))
-        if values is not None:
-            mask = np.logical_and(mask, np.in1d(these_hits[variable], values))
-        if greater_than is not None:
-            mask = np.logical_and(mask, these_hits[variable] > greater_than)
-        if less_than is not None:
-            mask = np.logical_and(mask, these_hits[variable] < less_than)
+        if not values is None:
+            # Switch to a list if a single value is given
+            if not isinstance(values, list):
+                values = [values]
+            this_mask = np.in1d(these_hits[variable], values)
+            mask = np.logical_and(mask, this_mask)
+        if not greater_than is None:
+            this_mask = these_hits[variable] > greater_than
+            mask = np.logical_and(mask, this_mask)
+        if not less_than is None:
+            this_mask = these_hits[variable] < less_than
+            mask = np.logical_and(mask, this_mask)
         if invert:
             mask = np.logical_not(mask)
         return mask
@@ -323,25 +326,38 @@ class FlatHits(object):
         Returns the section of the data where the variable equals
         any of the values
         """
-        mask = self._get_mask(these_hits, variable, values, greater_than,
-                              less_than, invert)
+        mask = self._get_mask(these_hits=these_hits, variable=variable,
+                              values=values, greater_than=greater_than,
+                              less_than=less_than, invert=invert)
         return these_hits[mask]
 
     def trim_hits(self, variable, values=None, greater_than=None,
                   less_than=None, invert=False):
         """
-        Remove these hits from the data
+        Keep the hits satisfying this criteria
         """
-        mask = self._get_mask(self.data, variable, values, greater_than,
-                              less_than, invert)
-        self.event_to_n_hits = np.bincount(self.hits_to_events[mask])
+        # Get the relevant hits to keep
+        mask = self._get_mask(these_hits=self.data, variable=variable,
+                              values=values, greater_than=greater_than,
+                              less_than=less_than, invert=False)
+        #TODO check this!!  Especially use of min_length
+        # Find the hits to remove
+        remove_mask = np.logical_not(mask)
+        n_hits_removed = np.bincount(self.hits_to_events[remove_mask],
+                                     minlength=self.n_events)
+        # Remove these sums
+        self.event_to_n_hits -= n_hits_removed
+        assert (self.event_to_n_hits >= 0).all(),\
+                "Negative number of events not allowed!"
         self.hits_to_events, self.event_to_hits =\
             self._generate_lookup_tables(self.event_to_n_hits)
         self.data = self.data[mask]
+        self.n_hits = len(self.data)
+        self.n_events = len(self.event_to_hits)
 
     def trim_events(self, events):
         """
-        Remove these events from the data
+        Keep these events in the data
         """
         keep_hits = np.concatenate(self.event_to_hits[events])
         keep_hits = keep_hits.astype(int)
@@ -451,7 +467,6 @@ class GeomHits(FlatHits):
         if has_trigger:
             trig_data = self._import_root_file(path, tree,
                                                branches=[self.trig_name])
-        # Otherwise have a placeholder for it
         else:
             trig_data = np.zeros(self.n_hits)
 
@@ -599,7 +614,7 @@ class GeomHits(FlatHits):
         # Check the trigger time has been set
         assert "CdcCell_mt" in self.all_branches,\
                 "Trigger time has not been set yet"
-        return self.get_measurement(events, self.prefix + self.trig_name)
+        return self.get_measurement(events, self.trig_name)
 
     def get_relative_time(self, events):
         """
@@ -620,7 +635,7 @@ class CyDetHits(GeomHits):
                  prefix="CdcCell", hit_type_name="hittype", n_hits_name="nHits",
                  row_name="layerID", idx_name="cellID", flat_name="vol_id",
                  time_name="tstart", edep_name="edep", trig_name="mt",
-                 signal_coding=1, finalize_data=True, n_evts=-1):
+                 signal_coding=1, finalize_data=True, n_evts=-1, time_offset=0):
         """
         This generates hit data in a structured array from an input root file
         from a file. It assumes the naming convention "CdcCell_"+ variable for
@@ -648,6 +663,7 @@ class CyDetHits(GeomHits):
         # Finialize the data if this is the final form
         if finalize_data:
             self._finalize_data()
+        self.time_offset = time_offset
 
     def get_measurement(self, events, name):
         """
@@ -662,7 +678,10 @@ class CyDetHits(GeomHits):
         # Get the wire_ids of the hit data
         wire_ids = self.get_hit_vols(events, unique=False)
         # Add the measurement to the correct cells in the result
-        result[wire_ids] += meas
+        if name == self.time_name:
+            result[wire_ids] += meas + np.ones(len(wire_ids))*self.time_offset
+        else:
+            result[wire_ids] += meas
         return result
 
     def get_hit_types(self, events, unique=True):
@@ -768,8 +787,8 @@ class CTHHits(GeomHits):
 
         # Add labels for upstream and downstream CTH setups
         z_pos_column = self._get_geom_z_pos(path, tree)
+        self.data += [z_pos_column[0]]
         self.z_pos_name = self.prefix + "position"
-        self.data.append(z_pos_column)
         self.all_branches.append(self.z_pos_name)
 
         # Initialize the up and down stream data holders
@@ -785,12 +804,12 @@ class CTHHits(GeomHits):
         """
         self.data = np.rec.fromarrays(self.data, names=self.all_branches)
         # Remove passive volumes from the hit data
-        self.trim_hits(self.data, self.z_pos_name, -1)
+        # TODO fix passive volume hack
+        self.trim_hits(variable=self.flat_name, values=range(0, 64*2))
         self.sort_hits(self.time_name)
         # Shortcut the upstream and downstream sections
         self.up_data = self.filter_hits(self.data, self.z_pos_name, 1)
         self.down_data = self.filter_hits(self.data, self.z_pos_name, 0)
-        print type(self.data)
 
     def _get_geom_flat_ids(self, path, tree):
         """
@@ -809,14 +828,7 @@ class CTHHits(GeomHits):
         # Flatten the volume names and IDs to flat_voldIDs
         flat_ids = np.zeros(self.n_hits)
         for row, idx, hit in zip(row_data, idx_data, range(self.n_hits)):
-            try:
-                flat_ids[hit] = self.geom.point_lookup[row, idx]
-                break
-            except IndexError:
-                print set(flat_ids)
-                print set(row_data)
-                print set(idx_data)
-                raise
+            flat_ids[hit] = self.geom.point_lookup[row, idx]
         # Save this column and name it
         flat_id_column = flat_ids.astype(int)
         return flat_id_column
@@ -834,7 +846,8 @@ class CTHHits(GeomHits):
         for vol in self.geom.active_names + self.geom.passive_names:
             z_pos_data = np.char.lstrip(z_pos_data.astype(str), vol)
         # Move to the passive ones
-        return (z_pos_data == 'U').astype(int)
+        z_pos_data = np.vectorize(self.geom.pos_to_col.get)(z_pos_data)
+        return z_pos_data
 
     def get_events(self, events=None, unique=True, hodoscope="up"):
         """
@@ -867,7 +880,7 @@ class CDCHits(FlatHits):
         # TODO assertion here
         self.cth = cth_hits
         self.cydet = cydet_hits
-        self.n_events = self.cydet.n_events
+        self.n_events = min(self.cydet.n_events, self.cth.n_events)
 
     def print_branches(self):
         """
@@ -885,30 +898,105 @@ class CDCHits(FlatHits):
         """
         self.cydet.trim_events(events)
         self.cth.trim_events(events)
+        self.n_events = self.cydet.n_events
 
-class HitsMerger(GeomHits):
+    def apply_timing_cut(self, cth_lower=700, cth_upper=110,
+                               cydet_lower=700, cydet_upper=1620):
+        """
+        Remove the hits that do not pass timing cut
+        """
+        self.cth.trim_hits(variable=self.cth.time_name,\
+                           less_than=1100, greater_than=700)
+        self.cydet.trim_hits(variable=self.cydet.time_name,\
+                           less_than=1620, greater_than=700)
+
+    def apply_cth_trigger(self):
+        """
+        Remove events that do not hit the CTH trigger
+        """
+        trigger_events = []
+        for evt in range(self.n_events):
+            sig_hits = self.cth.get_signal_hits(evt)
+            if len(sig_hits) != 0:
+                trigger_events.append(evt)
+        trigger_events = np.array(trigger_events)
+        self.trim_events(trigger_events)
+
+    def apply_n_hits_cut(self, n_hits=30):
+        """
+        Remove events that do not have enough CyDet hits
+        """
+        n_signal_hits = np.array([len(self.cydet.get_signal_hits(evt))
+                                 for evt in range(self.cydet.n_events)])
+        n_signal_hits = np.array(n_signal_hits)
+        good_n_hits = np.where(n_signal_hits >= n_hits)[0]
+        self.trim_events(good_n_hits)
+
+    def apply_max_layer_cut(self, ideal_layer=5):
+        """
+        Remove events that do not have enough CyDet hits
+        """
+        max_layer = []
+        for evt in range(self.n_events):
+            sig_wires = self.cydet.get_sig_wires(evt)
+            these_layers = self.cydet.geom.point_layers[sig_wires]
+            if len(sig_wires) != 0:
+                max_layer.append(np.max(these_layers))
+            else:
+                max_layer.append(-1)
+        max_layer = np.array(max_layer)
+        good_max_layer = np.where(max_layer >= ideal_layer)[0]
+        self.trim_events(good_max_layer)
+
+class HitsMerger(CyDetHits):
     # pylint: disable=too-many-instance-attributes
     # pylint: disable=bad-continuation
     # pylint: disable=relative-import
-    def __init__(self, first_class, second_class):
+    def __init__(self, sig_class, path, tree, this_class="cydet",
+            force_time_accept=True):
         """
         A class to support overlaying hit classes of the same type.  This will
         returned the combined event from each of the underlying hit classes.
 
         """
+        CyDetHits.__init__(self, path=path, tree=tree)
+
+
         # Ensure they are the same type of hits class
-        assert isinstance(first_class, second_class.__class__),\
-               "The two merged hits must be the same class\n"+\
-               "First Class : {}\n".format(first_class)+\
-               "Second Class : {}\n".format(second_class)
-        # Ensure they have the same geometry setup
-        assert first_class.geom == second_class.geom,\
-               "The two merged hits must have the same geometry"
+#        assert isinstance(sig_class, bck_class.__class__),\
+#               "The two merged hits must be the same class\n"+\
+#               "First Class : {}\n".format(sig_class)+\
+#               "Second Class : {}\n".format(bck_class)
+#        # Ensure they have the same geometry setup
+#        assert sig_class.geom == bck_class.geom,\
+#               "The two merged hits must have the same geometry"
         # Remember which one is which
-        self.first_class = first_class
-        self.second_class = second_class
+        self.sig_class = sig_class
+        self.this_class = this_class
+
+        self.summed_properties = [sig_class.edep_name]
+        self.minned_properties = [sig_class.time_name]
+        self.early_properties = [sig_class.hit_type_name]
+
+        # Force signal tracks to be in time acceptance window
+  #      if force_time_accept:
+  #          for evt in range(self.sig_class.n_events):
+  #              sig_time = self.sig_class.get_hit_time(evt)
+  #              self.sig_class.data[self.sig_class.time_name]
 
     def get_measurement(self, event, name):
-        first_measure = self.first_class.get_measurement(event, name)
-        second_measure = self.second_class.get_measurement(event, name)
-        return first_measure
+        sig_measure = self.sig_class.get_measurement(event, name)
+        bkg_measure = super(CyDetHits, self).get_measurement(event, name)
+        if self.this_class=="cth":
+            return np.append(bkg_measure, sig_measure)
+        if self.this_class=="cydet":
+            if name in self.summed_properties:
+                return sig_measure + bkg_measure
+            if name in self.minned_properties:
+                return np.amin(sig_measure, bkg_measure)
+            if name in self.early_properties:
+                sig_time = sig_class.get_hit_time(event)
+                bkg_time = super(HitsMerger,self).get_hit_time(event)
+                sig_mask = np.less(sig, bkg)
+                bkg_mask = np.logical_not(mask)
+                return sig_measure[sig_mask] + bkg_measure[bkg_mask]

@@ -13,6 +13,11 @@ Notation used below:
 class CylindricalArray(object):
     # pylint: disable=too-many-instance-attributes
     # pylint: disable=bad-continuation
+    def __eq__(self, other):
+        return (isinstance(other, self.__class__)
+            and self.__dict__ == other.__dict__)
+    def __ne__(self, other):
+        return not self.__eq__(other)
     def __init__(self, n_by_layer, r_by_layer, phi0_by_layer):
         """
         This defines a cylindrical array of points from a layers.  It returns a
@@ -311,36 +316,53 @@ class CyDet(CylindricalArray):
                           0.00000, 0.000000, 0.013426, 0.000000, 0.012771,
                           0.00000, 0.012177, 0.000000, 0.011636, 0.000000,
                           0.00000, 0.000000, 0.010686, 0.000000, 0.010267]
-
+        # TODO add different stereo projections
         CylindricalArray.__init__(self, cydet_wires, cydet_radii, cydet_phi0)
 
 class CTH(CylindricalArray):
-    def __init__(self, left_handed=True):
+    # pylint: disable=too-many-instance-attributes
+    def __init__(self, left_handed=False):
         """
         Defines the CTH geometry.  Note Cherenkov counter and light guide read
         out to the same volume here
         """
         self.left_handed = left_handed
         self.n_crystals = 64
-        cth_n_vols = [self.n_crystals, self.n_crystals]
-        cth_radii = [45, 48.5]
-        cth_phi0 = [0., 0.]
+        # The first two rows are for the active volumes, third is for excluded
+        # volumes
+        cth_n_vols = [self.n_crystals, self.n_crystals, self.n_crystals]
+        cth_radii = [44.8, 48.5, 0.0]
+        cth_phi0 = [-90., -90., -90.]
         CylindricalArray.__init__(self, cth_n_vols, cth_radii, cth_phi0)
 
-        # Store the volume names
+        # Store the active volume names
         self.chrn_name = "TriChe"
         self.chlg_name = "TriCheL"
         self.scnt_name = "TriSci"
-        self.vol_names = [self.chrn_name, self.chlg_name, self.scnt_name]
+        self.active_names = [self.chrn_name, self.chlg_name, self.scnt_name]
 
+        # Store the passive volume names
+        self.chpm_name = "TriCheP"
+        self.scpm_name = "TriSciP"
+        self.sclg_name = "TriSciL"
+        self.passive_names = [self.chpm_name, self.scpm_name, self.sclg_name]
 
-        # Map the upstream and downstream names to row indexes
+        # Map volume names to row indexes
         self.name_to_row = dict()
+        # Cherenkov volumes to inner ring
         self.name_to_row[self.chrn_name] = 0
-        self.name_to_row[self.scnt_name] = 1
-        # Map the light guide volumes to the cherenkov volumes
+        # Map the cherenkov light guide volumes to the cherenkov volumes
         self.name_to_row[self.chlg_name] =\
                 self.name_to_row[self.chrn_name]
+        # Map the scintillator to the outer ring
+        self.name_to_row[self.scnt_name] = 1
+        # Map the passive volumes to the passive row index
+        for vol in self.passive_names:
+            self.name_to_row[vol] = 2
+        # Position to column
+        self.pos_to_col = dict()
+        self.pos_to_col['U'] = 1
+        self.pos_to_col['D'] = 0
 
     def _prepare_dphi_by_layer(self):
         """

@@ -1,5 +1,6 @@
 import numpy as np
 import math
+import sys
 from scipy.sparse import lil_matrix, find, block_diag, hstack,\
         csr_matrix, identity
 from scipy.spatial.distance import cdist
@@ -17,7 +18,7 @@ class HoughSpace(object):
     # pylint: disable=too-many-instance-attributes
     # pylint: disable=bad-continuation
     # pylint: disable=no-name-in-module
-    def __init__(self, hit_data, sig_rho=33.6, sig_rho_max=35.,
+    def __init__(self, geom, sig_rho=33.6, sig_rho_max=35.,
                  sig_rho_min=24, sig_rho_sgma=3., trgt_rho=20., rho_bins=20,):
         """
         This class represents a Hough transform method. It initiates from a data
@@ -50,7 +51,7 @@ class HoughSpace(object):
         :param rho_bins: Bins used in the radial direction
         """
 
-        self.hit_data = hit_data
+        self.geom = geom
         self.sig_rho = sig_rho
         self.sig_rho_max = sig_rho_max
         self.sig_rho_min = sig_rho_min
@@ -61,9 +62,9 @@ class HoughSpace(object):
         # track passes through the target and the CyDet volume.  Specifically,
         # enforce that the track's outer most hits may lie in the first or last
         # layer.
-        r_max = self.hit_data.cydet.r_by_layer[-1] - self.sig_rho_max
+        r_max = self.geom.r_by_layer[-1] - self.sig_rho_max
         r_min = max(self.sig_rho_max - self.trgt_rho,
-                    self.hit_data.cydet.r_by_layer[0] - self.sig_rho_max)
+                    self.geom.r_by_layer[0] - self.sig_rho_max)
         self.track = TrackCenters(rho_bins=rho_bins, r_min=r_min, r_max=r_max)
 
         self.track_wire_dists = self._prepare_track_distances()
@@ -76,8 +77,8 @@ class HoughSpace(object):
 
         :return: numpy array of shape [n_wires,n_tracks]
         """
-        wire_xy = np.column_stack((self.hit_data.cydet.point_x,
-                                   self.hit_data.cydet.point_y))
+        wire_xy = np.column_stack((self.geom.point_x,
+                                   self.geom.point_y))
         trck_xy = np.column_stack((self.track.point_x, self.track.point_y))
         distances = cdist(wire_xy, trck_xy)
         return distances
@@ -104,11 +105,11 @@ class HoughSpace(object):
 
         :returns: scipy.sparse matrix of shape [n_wires, n_track_bin]
         """
-        corsp = lil_matrix((self.hit_data.cydet.n_points, self.track.n_points))
+        corsp = lil_matrix((self.geom.n_points, self.track.n_points))
         # Loop over all track centers
         for trck in range(self.track.n_points):
             # Loop over all wires in CyDet
-            for wire in range(self.hit_data.cydet.n_points):
+            for wire in range(self.geom.n_points):
                 # Calculate how far the wire is from the signal track centered
                 # at the current track center
                 this_dist = self.track_wire_dists[wire, trck]
@@ -117,8 +118,8 @@ class HoughSpace(object):
                    (this_dist >= self.sig_rho_min):
                     corsp[wire, trck] = self.dist_prob(this_dist)
         # Define even and odd layer wires
-        even_wires = self.hit_data.cydet.point_pol != 1
-        odd_wires = self.hit_data.cydet.point_pol == 1
+        even_wires = self.geom.point_pol != 1
+        odd_wires = self.geom.point_pol == 1
         # Make even and odd layer hough matricies
         corsp_odd = corsp.copy()
         corsp_odd[even_wires, :] = 0
@@ -297,40 +298,62 @@ class HoughShifter(object):
     # pylint: disable=too-many-instance-attributes
     # pylint: disable=bad-continuation
     # pylint: disable=no-name-in-module
-    def __init__(self, hough, upper_lim, lower_lim, dphi):
+    def __init__(self, hough, upper_lim, lower_lim, dphi=None):
         """
         A class that handles shifting the even layers to remove the stereometric
         effects
 
-        :param hough_matrix:    Hough transform matrix
-        :param track_neighs:    Nearest neighbour matrix for tracks
-        :param min_percentile:  Bottom percentile ignored in hough space
-        :param alpha_rw:        Weight of reweight in hough space
-        :param alpha_max:       Weight of peak reweight in hough space
-        :param regular:         Regularization used to normalize correspondence
-                                matrix
+        :param hough:      Hough instance used to deduce geometry of track
+                           centres
+        :param dphi:       Unit of angular shift used when shifting aligning
+                           hough image
+        :param upper_lim:  Upper limit when scanning dphi, in units of dphi
+        :param lower_lim:  Lower limit when scanning dphi, in units of dphi
         """
         self.hough = hough
+        self.geom = hough.geom
         self.upper_lim = upper_lim
         self.lower_lim = lower_lim
-        self.dphi = dphi
-        self.phi_slices = self._get_slices(hough)
-        self.shifters = self._get_shifters(hough.hits_data.cydet)
+        # Default for dphi is the angular separation of the points in the inner
+        # most tracking layer
+        if dphi == None:
+            self.dphi = 2*np.pi/self.hough.track.n_by_layer[0]
+        else:
+            self.dphi = dphi
+        self.phi_slices = self._get_slices()
+        self.shifters = self._get_shifters()
+        # Initialize the indecies used to shift the image to the ideal angle
+        self.rotate_index = None
 
-    def _get_slices(self, hough):
-        # Integrate over slices in phi
+    def _get_slices(self):
+        """
+        Returns a sparse matrix that denotes which hough track centers belong to
+        each slice in phi.  The shape is:
+
+        (number of slices in phi) x (number of track centres)
+
+        If a track j is in slice i, then phi_slices[i][j] is non-zero.  It is
+        zero otherwise.  Each row of slices is normalized by the number of track
+        centres it has.
+
+        :return:        CSR matrix defining slices in phi and the corresponding
+                        track centre points
+        """
+        # Determine the number of slices in phi
         n_phis = np.ceil(2*np.pi/self.dphi).astype(int)
+        # Initialize the set of points in the previous slice
         prev_slice = np.zeros(0)
-        all_slices = lil_matrix((n_phis, hough.track.n_points))
+        # Initialize the returned sparse matrix
+        all_slices = lil_matrix((n_phis, self.hough.track.n_points))
         for phi_slice in range(n_phis):
-            # Define phi ranges
+            # Define phi range for this slice
             phi_0 = phi_slice*self.dphi
             phi_1 = phi_0 + self.dphi
-            # Get the slice you want
+            # Get the track centres in this range
             this_slice = np.where(\
-                    (hough.tracks.point_phis() >= phi_0) &\
-                    (hough.tracks.point_phis() < phi_1))[0]
-            # Avoid double counting a point
+                    (self.hough.track.point_phis >= phi_0) &\
+                    (self.hough.track.point_phis < phi_1))[0]
+            # Avoid double counting a track centre
             this_slice = np.setdiff1d(this_slice, prev_slice)
             prev_slice = this_slice
             # Add these points to the slice
@@ -338,57 +361,154 @@ class HoughShifter(object):
         # Normalize by the number in each slice to get density in phi
         return csr_matrix(all_slices / all_slices.sum(axis=1))
 
-    def _shift_wire_ids(self, cydet, wire_shift):
-        return np.array([cydet.shift_wire(wire, shift)\
-                            for wire, shift\
-                            in zip(np.arange(cydet.n_points), wire_shift)])
+    def _shift_wire_ids(self, wire_shift):
+        """
+        Shift each wire ID by the amount of wire centres given.  Note that this
+        calls the cydet.shift_wire function, so wires locations themselves are
+        unchanged, but each wire ID is mapped to a new wire location.
 
-    def _get_even_shift(self, cydet, phi_shift=2*np.pi/81.):
-        shift_by_layer = np.zeros(len(cydet.dphi_by_layer))
-        shift_by_layer[::2] = -np.round(phi_shift/cydet.dphi_by_layer)[::2]
+        :param wire_shift:  The amount each wire is shifted, where positive
+                            denotes the counter clockwise direction
+        :return:            The new ID for each wire
+        """
+        return np.array([self.geom.shift_wire(wire, shift)\
+                            for wire, shift\
+                            in zip(np.arange(self.geom.n_points), wire_shift)])
+
+    def _get_even_shift(self, phi_shift=2*np.pi/81.):
+        #TODO try adding option to shift odd layers as well
+        """
+        Shift the even layers by phi_shift to return a new wire index after the
+        shift.
+
+        :param phi_shift:   The angular shift of the even layer
+
+        :return forward_index:   The new index of each wire
+        :return backward_index:  The old index of each wire after it has been
+                                 shifted
+        """
+        # Initialize the shift by layer
+        shift_by_layer = np.zeros(len(self.geom.dphi_by_layer))
+        # Shift the even layers clockwise by the closest number of wire cells to
+        # the desired phi_shift
+        shift_by_layer[::2] = -np.round(phi_shift/self.geom.dphi_by_layer)[::2]
         shift_by_layer = shift_by_layer.astype(int)
-        shift_by_wire = np.take(shift_by_layer, cydet.point_layers)
-        forward_index = self._shift_wire_ids(cydet, shift_by_wire)
+        # Denote this shift by wire ID
+        shift_by_wire = np.take(shift_by_layer, self.geom.point_layers)
+        # Determine the forward shift to the aligned hough space
+        forward_index = self._shift_wire_ids(shift_by_wire)
+        # Record the backward shift by inverting the mapping
         backward_index = np.argsort(forward_index)
+        # Return both the forward and backward shifts
         return forward_index, backward_index
 
+    def _get_shifters(self):
+        """
+        Get the shifted wire IDs for a the allowed range of dphis.  Note that
+        the zeroth element of the returned shifters corresponds to the lower
+        limit of the shift in phi, whereas the last element is the upper limit
+        of the shift.
 
-    def _get_shifters(self, cydet):
+        :return forward_shift:  Forward shifted wire IDs for each allowed dphi.
+                                Shape is [n_dphi, n_wires]
+        :return backward_shift: Backward shifted wire IDs for each allowed dphi.
+                                Shape is [n_dphi, n_wires]
+        """
+        # Initialize all the desired range of dphis to test
         phi_range = np.arange(self.lower_lim, self.upper_lim+1)*self.dphi
-        both_shifts = np.dstack(\
-                np.vstack(self._get_even_shift(cydet, phi_shift))\
+        # Collect all the shifted IDs as [forward/backward, n_wires, n_dphis]
+        forward_shift, backward_shift = np.dstack(\
+                np.vstack(self._get_even_shift(phi_shift))\
                 for phi_shift in phi_range)
-        forward_shift = both_shifts[0]
-        backwards_shift = both_shifts[1]
-        return forward_shift.T, backwards_shift.T
+        # Return the needed shape
+        return forward_shift.T, backward_shift.T
 
     def _get_ideal_shift(self, even_slices, odd_slices):
+        """
+        Given an integration in hough space due to the even and odd layer
+        contributions, determine the ideal shift in phi such that these
+        contributions maximally overlap.
+
+        :param even_slices:  contribution to hough space slices due to even
+                             layer hits
+        :param odd_slices:   contribution to hough space slices due to odd
+                             layer hits
+        :return ideal_phi:   Angular shift to maximally overlap these two in
+                             units of dphi
+        """
         # Find the ideal shift in phi to align images in hough space
-        diff = 1000000
-        ideal_phi = -100
+        diff = sys.maxint
+        # Try shifting the integrated contributions by each of the allowed dphis
         for phi_shift in range(self.lower_lim, self.upper_lim+1):
+            # Shift the integral of contributions over by a given dphi
             new_even_slices = np.roll(even_slices, phi_shift)
+            # Get the sum of the square of the difference
             this_diff = np.sum(np.square(new_even_slices - odd_slices))
+            # Check for the best overlap
             if this_diff < diff:
                 diff = this_diff
                 ideal_phi = phi_shift
+        # Return the phi denoting the best overlap
         return ideal_phi
 
-    def fit_shift(self, to_align):
-        # Get even and odd contributions
-        hough_image_even = to_align[:, :self.hough.track.n_points]
-        hough_image_odd = to_align[:, self.hough.track.n_points:]
+    def fit_shift(self, hough_image_even, hough_image_odd):
+        """
+        Find the ideal rotations for each pair of even and odd contributions to
+        hough space
 
+        :param hough_image_even:  The hough space contributions from the even
+                                  layers.  Shape is [n_images x n_track_centres]
+        :param hough_image_odd:   The hough space contributions from the odd
+                                  layers.  Shape is [n_images x n_track_centres]
+
+        :return ideal_roate:      Ideal rotation for each image in radians
+        :return slices_even:      Integral of hough space before shift due to
+                                  even layers
+        :return slices_odd:       Integral of hough space before shift due to
+                                  odd layers
+        """
+        # Record the number of images
+        assert hough_image_even.shape[0] == hough_image_odd.shape[0],\
+            'Number of even images, {} '.format(hough_image_even.shape[0])+\
+            'does not match the '+\
+            'number of odd images, {}'.format(hough_image_odd.shape[0])
+        n_images = hough_image_even.shape[0]
+        # Get even and odd contributions
         slices_even = self.phi_slices.dot(hough_image_even.T).T
         slices_odd = self.phi_slices.dot(hough_image_odd.T).T
         # Find the ideal rotations
         ideal_rotate = np.array(\
                 [self._get_ideal_shift(slices_even[evt, :], slices_odd[evt, :])\
-                                 for evt in range(to_align.shape[0])])
-        ideal_rotate -= self.lower_lim
+                                 for evt in range(n_images)])
+        # Store the indexes to reference the correct shifters later
+        self.rotate_index = ideal_rotate - self.lower_lim
+        # Return a physical angle
+        ideal_rotate *= self.dphi
         return ideal_rotate, slices_even, slices_odd
 
-    def shift_result(self, results, ideal_rotate):
-        return np.vstack(evt_res[self.shifters[evt_rot]]\
-                for evt_res, evt_rot in zip(results, ideal_rotate))
+    def shift_result(self, results, backward=False):
+        """
+        Rotate the results for a set of events to the ideal rotations, as
+        determined in fit_shift().
 
+        :param results: Event wise results to be shifted.  The shape should be
+                        [n_evts x n_wires]
+        """
+        # Check this instance has been fit to some hough images first
+        assert self.rotate_index != None,\
+                "The shifter has not been fit to a set of hough images yet. "+\
+                "Call HoughShifter.fit_shift() first."
+        # Check that this instance has been fit to the hough image corresponding
+        # to the results we are now shifting
+        assert results.shape[0] == self.rotate_index.shape[0],\
+                "The number of ideal rotations and the number of events in "+\
+                "the result do not match.  Check this instance has been fit "+\
+                "to the hough image from these results."
+        # Select the direction we will be shifting the result
+        if backward == True:
+            this_shift = self.shifters[1]
+        else:
+            this_shift = self.shifters[0]
+        # Returned a rotated image of the result
+        return np.vstack(evt_res[this_shift[evt_rot]]\
+                for evt_res, evt_rot in zip(results, self.rotate_index))
