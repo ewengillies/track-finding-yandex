@@ -554,7 +554,7 @@ class GeomHits(FlatHits):
         :return: numpy array of hit wires
         """
         # Select the relevant event from data
-        return self.get_hit_vols(events, unique, hit_type="bkg")
+        return self.get_hit_vols(events, unique, hit_type="back")
 
     def get_hit_vector(self, events, unique=True):
         """
