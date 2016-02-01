@@ -17,7 +17,7 @@ class FlatHits(object):
     def __init__(self, path="../data/151208_SimChen_noise.root",
                  tree='tree', prefix="CdcCell", branches=None,
                  hit_type_name="hittype", n_hits_name="nHits",
-                 signal_coding=1, build_record=True, finalize_data=True,
+                 signal_coding=1, finalize_data=True,
                  n_evts=-1):
         """
         Dataset provides an interface to work with MC stored in root format.
@@ -39,7 +39,7 @@ class FlatHits(object):
                               signal hit.  Default is 1
         """
         # Assumptions about data naming and signal labelling conventions
-        self.prefix = prefix + "_"
+        self.prefix = prefix
         self.n_hits_name = self.prefix + n_hits_name
         self.hit_type_name = self.prefix + hit_type_name
         self.signal_coding = signal_coding
