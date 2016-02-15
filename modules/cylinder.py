@@ -375,7 +375,7 @@ class CTH(CylindricalArray):
             return 2 * math.pi / np.asarray(self.n_by_layer)
 
 class TrackCenters(CylindricalArray):
-    def __init__(self, r_min=10., r_max=50., rho_bins=10, arc_res=0):
+    def __init__(self, r_min=10., r_max=50., rho_bins=10, arc_bins=0):
         """
         Defines the geometry of the centers of the potential tracks used in the
         Hough transform.  It is constructed from a minimum radius, maximum
@@ -383,12 +383,12 @@ class TrackCenters(CylindricalArray):
         layers. The outer most layer will be at the maximal radius, while the
         inner most will be at the inner most radius.
 
-        :param r_min: Radius of inner most layer
-        :param r_max: Radius of outer most layer
-        :param rho_bin: Number of radial layers
-        :param arc_res: Arc length between points along the layers. Default
-                        value set this to be the same as the distance between
-                        layers
+        :param r_min:     Radius of inner most layer
+        :param r_max:     Radius of outer most layer
+        :param rho_bins:  Number of radial layers
+        :param arc_bins:  Arc length between points along the layers. Default
+                          value set this to be the same as the distance between
+                          layers
         """
         # Define distance between layers to that the radii fall in [r_min,
         # r_max] inclusive
@@ -396,8 +396,10 @@ class TrackCenters(CylindricalArray):
         r_track_cent = [r_min + drho * n for n in range(rho_bins)]
         # Set default spacial resolution along layers to be the same as the
         # resolution between layers
-        if arc_res == 0:
+        if arc_bins == 0:
             arc_res = drho
+        else:
+            arc_res = 2 * math.pi * r_min / arc_bins
         n_track_cent = [int(round(2 * math.pi * r_track_cent[n] / arc_res))
                         for n in range(rho_bins)]
         phi0_track_cent = [0] * rho_bins

@@ -19,7 +19,8 @@ class HoughSpace(object):
     # pylint: disable=bad-continuation
     # pylint: disable=no-name-in-module
     def __init__(self, geom, sig_rho=33.6, sig_rho_max=35.,
-                 sig_rho_min=24, sig_rho_sgma=3., trgt_rho=20., rho_bins=20,):
+                 sig_rho_min=24, sig_rho_sgma=3., trgt_rho=20., rho_bins=20,
+                 arc_bins=20):
         """
         This class represents a Hough transform method. It initiates from a data
         file, and over lays a track center geometry on this.  It also defines a
@@ -49,6 +50,7 @@ class HoughSpace(object):
                          represents the constraint that the track started near
                          the origin.
         :param rho_bins: Bins used in the radial direction
+        :param arc_bins:  Number of angular bins in smallest track center ring
         """
 
         self.geom = geom
@@ -65,7 +67,7 @@ class HoughSpace(object):
         r_max = self.geom.r_by_layer[-1] - self.sig_rho_max
         r_min = max(self.sig_rho_max - self.trgt_rho,
                     self.geom.r_by_layer[0] - self.sig_rho_max)
-        self.track = TrackCenters(rho_bins=rho_bins, r_min=r_min, r_max=r_max)
+        self.track = TrackCenters(arc_bins=arc_bins, rho_bins=rho_bins, r_min=r_min, r_max=r_max)
 
         self.track_wire_dists = self._prepare_track_distances()
         self.correspondence = self._prepare_wire_track_corresp()
@@ -483,7 +485,7 @@ class HoughShifter(object):
         # Store the indexes to reference the correct shifters later
         self.rotate_index = ideal_rotate - self.lower_lim
         # Return a physical angle
-        ideal_rotate *= self.dphi
+        ideal_rotate = ideal_rotate*self.dphi
         return ideal_rotate, slices_even, slices_odd
 
     def shift_result(self, results, backward=False):
@@ -495,7 +497,7 @@ class HoughShifter(object):
                         [n_evts x n_wires]
         """
         # Check this instance has been fit to some hough images first
-        assert self.rotate_index != None,\
+        assert self.rotate_index is not None,\
                 "The shifter has not been fit to a set of hough images yet. "+\
                 "Call HoughShifter.fit_shift() first."
         # Check that this instance has been fit to the hough image corresponding

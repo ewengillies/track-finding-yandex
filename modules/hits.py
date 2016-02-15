@@ -15,7 +15,7 @@ class FlatHits(object):
     # pylint: disable=too-many-instance-attributes
     # pylint: disable=bad-continuation
     def __init__(self, path="../data/151208_SimChen_noise.root",
-                 tree='tree', prefix="CdcCell", branches=None,
+                 tree='tree', prefix="CdcCell_", branches=None,
                  hit_type_name="hittype", n_hits_name="nHits",
                  signal_coding=1, finalize_data=True,
                  n_evts=-1):
@@ -105,6 +105,8 @@ class FlatHits(object):
         """
         Trim the lookup tables to the given event indexes
         """
+        # Check which events were already removed
+
         # Trim the event indexed tables
         self.event_to_n_hits = self.event_to_n_hits[events]
         self.hits_to_events, self.event_to_hits =\
@@ -359,6 +361,7 @@ class FlatHits(object):
         """
         Keep these events in the data
         """
+        # TODO have this operate on event_index
         keep_hits = np.concatenate(self.event_to_hits[events])
         keep_hits = keep_hits.astype(int)
         self.data = self.data[keep_hits]
@@ -404,7 +407,7 @@ class GeomHits(FlatHits):
     # pylint: disable=relative-import
     # pylint: disable=unbalanced-tuple-unpacking
     def __init__(self, geom, path="../data/signal.root", tree='tree', n_evts=-1,
-                 branches=None, prefix="CdcCell", hit_type_name="hittype",
+                 branches=None, prefix="CdcCell_", hit_type_name="hittype",
                  n_hits_name="nHits", row_name="layerID", idx_name="cellID",
                  edep_name="edep", time_name="t", flat_name="vol_id",
                  trig_name="mt", signal_coding=1, finalize_data=True):
@@ -632,7 +635,7 @@ class CyDetHits(GeomHits):
     # pylint: disable=bad-continuation
     # pylint: disable=relative-import
     def __init__(self, path="../data/signal.root", tree='tree', branches=None,
-                 prefix="CdcCell", hit_type_name="hittype", n_hits_name="nHits",
+                 prefix="CdcCell_", hit_type_name="hittype", n_hits_name="nHits",
                  row_name="layerID", idx_name="cellID", flat_name="vol_id",
                  time_name="tstart", edep_name="edep", trig_name="mt",
                  signal_coding=1, finalize_data=True, n_evts=-1, time_offset=0):
@@ -652,7 +655,7 @@ class CyDetHits(GeomHits):
                               signal hit
         """
         GeomHits.__init__(self, CyDet(), path=path, tree=tree,
-                          branches=branches, prefix="CdcCell",
+                          branches=branches, prefix=prefix,
                           hit_type_name=hit_type_name, n_hits_name=n_hits_name,
                           row_name=row_name, idx_name=idx_name,
                           time_name=time_name, edep_name=edep_name,
@@ -758,7 +761,7 @@ class CTHHits(GeomHits):
     # pylint: disable=bad-continuation
     # pylint: disable=relative-import
     def __init__(self, path="../data/signal.root", tree='tree', branches=None,
-                 prefix="M", hit_type_name="hittype", n_hits_name="nHits",
+                 prefix="M_", hit_type_name="hittype", n_hits_name="nHits",
                  row_name="volName", idx_name="volID", flat_name="vol_id",
                  time_name="t", edep_name="edep", signal_coding=1,
                  finalize_data=True, n_evts=-1):
@@ -778,7 +781,7 @@ class CTHHits(GeomHits):
                               signal hit
         """
         GeomHits.__init__(self, CTH(), path=path, tree=tree, n_evts=n_evts,
-                          branches=branches, prefix="M",
+                          branches=branches, prefix=prefix,
                           hit_type_name=hit_type_name, n_hits_name=n_hits_name,
                           row_name=row_name, idx_name=idx_name,
                           time_name=time_name, edep_name=edep_name,
@@ -849,7 +852,7 @@ class CTHHits(GeomHits):
         z_pos_data = np.vectorize(self.geom.pos_to_col.get)(z_pos_data)
         return z_pos_data
 
-    def get_events(self, events=None, unique=True, hodoscope="up"):
+    def get_events(self, events=None, unique=True, hodoscope="both"):
         """
         Returns the hits from the given event(s).  Default gets all events
 
@@ -863,7 +866,7 @@ class CTHHits(GeomHits):
         events = super(self.__class__, self).get_events(events)
         if hodoscope.startswith("up"):
             events = self.filter_hits(events, self.z_pos_name, 1)
-        elif hodoscope.startswith("back"):
+        elif hodoscope.startswith("down"):
             events = self.filter_hits(events, self.z_pos_name, 0)
         return events
 
