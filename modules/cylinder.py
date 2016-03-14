@@ -42,7 +42,8 @@ class CylindricalArray(object):
         self.dphi_by_layer = self._prepare_dphi_by_layer()
         self.point_lookup = self._prepare_points_lookup()
         self.point_rhos = self._prepare_point_rho()
-        self.point_layers = np.round(((self.point_rhos - 53)/1.6)).astype(int)
+        self.point_layers = np.round(((self.point_rhos - self.point_rhos[0])/1.6))
+        self.point_layers = self.point_layers.astype(int)
         self.point_phis = self._prepare_point_phi()
         self.point_x, self.point_y = self._prepare_point_cartesian()
         self.point_pol = self._prepare_polarity()
@@ -299,23 +300,17 @@ class CylindricalArray(object):
 
 
 class CyDet(CylindricalArray):
-    def __init__(self, use_default_phis=False):
+    def __init__(self):
         """
         Defines the Cylindrical Detector Geometry
         """
         cydet_wires = [198, 204, 210, 216, 222, 228, 234, 240, 246,
                        252, 258, 264, 270, 276, 282, 288, 294, 300]
-        cydet_radii = [53, 54.6, 56.2, 57.8, 59.4, 61, 62.6, 64.2, 65.8,
-                       67.4, 69, 70.6, 72.2, 73.8, 75.4, 77, 78.6, 80.2]
-        if use_default_phis:
-            cydet_phi0 = [0.015867, 0.0, 0.0, 0.0, 0.0, 0.014960,
-                          0.014960, 0.0, 0.0, 0.0, 0.0, 0.000000,
-                          0.000000, 0.0, 0.0, 0.0, 0.0, 0.000000]
-        else:
-            cydet_phi0 = [0.00000, 0.015867, 0.015400, 0.000000, 0.014544,
-                          0.00000, 0.000000, 0.013426, 0.000000, 0.012771,
-                          0.00000, 0.012177, 0.000000, 0.011636, 0.000000,
-                          0.00000, 0.000000, 0.010686, 0.000000, 0.010267]
+        cydet_radii = [53.0, 54.6, 56.2, 57.8, 59.4, 61.0, 62.6, 64.2, 65.8,
+                       67.4, 69.0, 70.6, 72.2, 73.8, 75.4, 77.0, 78.6, 80.2]
+        cydet_phi0 = [0.015867, 0.015400, 0.000000, 0.014544, 0.00000, 0.000000,
+                      0.013426, 0.000000, 0.012771, 0.00000, 0.012177, 0.000000,
+                      0.011636, 0.000000, 0.00000, 0.000000, 0.010686, 0.000000]
         # TODO add different stereo projections
         CylindricalArray.__init__(self, cydet_wires, cydet_radii, cydet_phi0)
 
