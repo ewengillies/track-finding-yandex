@@ -304,15 +304,56 @@ class CyDet(CylindricalArray):
         """
         Defines the Cylindrical Detector Geometry
         """
+        # Number of wires in each layer
         cydet_wires = [198, 204, 210, 216, 222, 228, 234, 240, 246,
-                       252, 258, 264, 270, 276, 282, 288, 294, 300]
+                       252, 258, 264, 270, 276, 282, 288, 294, 300] 
+        # Radius at end plate
         cydet_radii = [53.0, 54.6, 56.2, 57.8, 59.4, 61.0, 62.6, 64.2, 65.8,
                        67.4, 69.0, 70.6, 72.2, 73.8, 75.4, 77.0, 78.6, 80.2]
+        # Phi0 at end plate
         cydet_phi0 = [0.015867, 0.015400, 0.000000, 0.014544, 0.00000, 0.000000,
                       0.013426, 0.000000, 0.012771, 0.00000, 0.012177, 0.000000,
                       0.011636, 0.000000, 0.00000, 0.000000, 0.010686, 0.000000]
-        # TODO add different stereo projections
+        # Build the cylindrical array
         CylindricalArray.__init__(self, cydet_wires, cydet_radii, cydet_phi0)
+
+        # Define the maximum angular shift of the wires in each layer from end
+        # plate to the next  
+        self.phi_shft = np.array([-0.190400, 0.184800, -0.179520, 0.174533,
+                                  -0.169816, 0.165347, -0.161107, 0.157080, 
+                                  -0.153248, 0.149600, -0.146121, 0.142800, 
+                                  -0.139626, 0.136591, -0.155966, 0.152716,
+                                  -0.149600, 0.146608])
+
+    def theta_at_rel_z(self, z_dist, total_z=1.0):
+        """
+        Get the angular displacement of the wires in each layer as a function of
+        the relative z_distance traversed
+
+        :param z_dist:   z distance down CyDet volume
+        :param total_z:  total z distance of CyDet volume
+
+        :return: numpy array of angular shifts, one per layer
+        """
+        mid_val = self.phi_shft/2.
+        this_shft = np.arctan(np.tan(self.phi_shft/2.)*(1. - 2.*z_dist/total_z))
+        return mid_val - this_shft
+
+    def radius_at_theta(self, radius, this_theta):
+        """
+        Get the new radial distance of a wire as a function of :
+          * The total angular displacement of the wire-hole between end plates
+          * The angle displacement subtended
+        
+        Note the angular displacment subtended must be less than the total
+        angular displacement by definition.  
+        """
+        assert not np.any(np.abs(this_theta) > np.abs(self.phi_shft)),\
+            "The input angle is larger than the absoulte angular difference\n"+\
+            "Abs. Diff. {} \n".format(self.phi_shft)+\
+            "Reqs. Ang. {} \n".format(this_theta)
+        return abs(radius*np.cos(self.phi_shft/2.)/np.cos(self.phi_shft/2. - this_theta))
+        
 
 class CTH(CylindricalArray):
     # pylint: disable=too-many-instance-attributes
