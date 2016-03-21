@@ -300,7 +300,7 @@ class CylindricalArray(object):
 
 
 class CyDet(CylindricalArray):
-    def __init__(self):
+    def __init__(self, projection=0.5):
         """
         Defines the Cylindrical Detector Geometry
         """
@@ -314,9 +314,6 @@ class CyDet(CylindricalArray):
         cydet_phi0 = [0.015867, 0.015400, 0.000000, 0.014544, 0.00000, 0.000000,
                       0.013426, 0.000000, 0.012771, 0.00000, 0.012177, 0.000000,
                       0.011636, 0.000000, 0.00000, 0.000000, 0.010686, 0.000000]
-        # Build the cylindrical array
-        CylindricalArray.__init__(self, cydet_wires, cydet_radii, cydet_phi0)
-
         # Define the maximum angular shift of the wires in each layer from end
         # plate to the next  
         self.phi_shft = np.array([-0.190400, 0.184800, -0.179520, 0.174533,
@@ -324,6 +321,13 @@ class CyDet(CylindricalArray):
                                   -0.153248, 0.149600, -0.146121, 0.142800, 
                                   -0.139626, 0.136591, -0.155966, 0.152716,
                                   -0.149600, 0.146608])
+
+        dphi_from_phi0 = self.theta_at_rel_z(projection)
+        new_radius = self.radius_at_theta(cydet_radii, dphi_from_phi0)
+        new_dphi = dphi_from_phi0 + cydet_phi0
+
+        # Build the cylindrical array
+        CylindricalArray.__init__(self, cydet_wires, new_radius, new_dphi)
 
     def theta_at_rel_z(self, z_dist, total_z=1.0):
         """
@@ -338,6 +342,21 @@ class CyDet(CylindricalArray):
         mid_val = self.phi_shft/2.
         this_shft = np.arctan(np.tan(self.phi_shft/2.)*(1. - 2.*z_dist/total_z))
         return mid_val - this_shft
+
+    def rel_z_at_theta(self, theta, layer=0):
+        """
+        Get the relative z displacement for a given angular disagreement in a
+        given layer
+
+        :param theta: the angular displacement
+        :param layer: the layer of disagreement
+
+        :return: the relative z displacement from this stereometry
+        """
+        this_phi_shft = self.phi_shft[layer]/2.
+        tan_phi_shft = np.tan(this_phi_shft)
+        diff_phi_shift = np.tan(this_phi_shft - theta)
+        return (tan_phi_shft - diff_phi_shift)/(2. * tan_phi_shft)
 
     def radius_at_theta(self, radius, this_theta):
         """
