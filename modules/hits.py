@@ -182,18 +182,25 @@ class FlatHits(object):
             # If we know the number of hits and events, require the branch is as
             # long as one of these
             if (self.n_hits is not None) and (self.n_events is not None):
-                # Concatonate the branch if it is an array of lists, i.e. if it
-                # is defined for every hit
-                if event_data.dtype[branch] == object:
-                    event_data = np.concatenate(event_data[branch])
-                    # Check that the right number of hits are defined
-                    data_length = len(event_data)
-                # Otherwise assume it is defined event-wise, stretch it by event
-                # so each hit has the value corresponding to its event.
+                # Record the number of entries
+                data_length = len(event_data)
+                # Deal with variables defined once per event
+                if data_length == self.n_events:
+                    # Concatonate the branch if it is an array of lists, i.e. if
+                    # it is defined for every hit
+                    if event_data.dtype[branch] == object:
+                        event_data = np.concatenate(event_data[branch])
+                        # Check that the right number of hits are defined
+                        data_length = len(event_data)
+                    # Otherwise assume it is defined event-wise, stretch it by
+                    # event so each hit has the value corresponding to its
+                    # event.
+                    else:
+                        # Check the length
+                        data_length = len(event_data)
+                        event_data = event_data[branch][self.hits_to_events]
                 else:
-                    # Check the length
-                    data_length = len(event_data)
-                    event_data = event_data[branch][self.hits_to_events]
+                    event_data = event_data[branch]
                 # Check that the length of the array makes sense
                 assert (data_length == self.n_hits) or\
                        (data_length == self.n_events),\
@@ -235,7 +242,15 @@ class FlatHits(object):
         hits_to_events = hits_to_events.astype(int)
         return hits_to_events, event_to_hits
 
-    def _get_event_to_hits_lookup(self, path, tree):
+    def _get_n_hits_flat(self, path, tree, ):
+        """
+        Creates look up tables to map from events to hits index and from
+        hit to event number
+        """
+        _ = self._check_for_branches
+ 
+
+    def _get_event_to_hits_lookup(self, path, tree, flat=False):
         """
         Creates look up tables to map from events to hits index and from
         hit to event number
