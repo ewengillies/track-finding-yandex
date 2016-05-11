@@ -3,6 +3,7 @@ import numpy.lib.recfunctions
 from root_numpy import root2array
 from cylinder import CyDet, CTH
 from random import Random
+from collections import Counter
 
 """
 Notation used below:
@@ -14,11 +15,17 @@ Notation used below:
 class FlatHits(object):
     # pylint: disable=too-many-instance-attributes
     # pylint: disable=bad-continuation
-    def __init__(self, path="../data/151208_SimChen_noise.root",
-                 tree='tree', prefix="CdcCell_", branches=None,
-                 hit_type_name="hittype", n_hits_name="nHits",
-                 signal_coding=1, finalize_data=True,
-                 n_evts=-1):
+    def __init__(self,
+                 path="../data/151208_SimChen_noise.root",
+                 tree='tree',
+                 prefix="CdcCell_",
+                 branches=None,
+                 hit_type_name="hittype",
+                 key_name="nHits",
+                 use_evt_idx=True,
+                 signal_coding=1,
+                 finalize_data=True,
+                 n_evts=None):
         """
         Dataset provides an interface to work with MC stored in root format.
         Results of methods are either numpy.arrays or scipy.sparse objects.
@@ -40,10 +47,11 @@ class FlatHits(object):
         """
         # Assumptions about data naming and signal labelling conventions
         self.prefix = prefix
-        self.n_hits_name = self.prefix + n_hits_name
+        self.key_name = self.prefix + key_name
         self.hit_type_name = self.prefix + hit_type_name
         self.signal_coding = signal_coding
         self.n_events = n_evts
+        self.use_evt_idx = use_evt_idx
         # Set the number of hits, the number of events, and data to None so that
         # the the next import_root_file knows its the first call
         self.n_hits, self.data = (None, None)
@@ -65,7 +73,8 @@ class FlatHits(object):
 
         # Initialize our data and look up tables
         self.hits_to_events, self.event_to_hits, self.event_to_n_hits =\
-            self._get_event_to_hits_lookup(path, tree=tree)
+            self._get_event_to_hits_lookup(path, 
+                                           tree=tree)
 
         # Set the number of hits and events for this data
         self.n_hits = len(self.hits_to_events)
@@ -80,7 +89,8 @@ class FlatHits(object):
             data_columns = []
 
         # Label each hit with the number of hits in its event
-        all_n_hits_column = [self.event_to_n_hits[self.hits_to_events]]
+        all_key_column = self._import_root_file(path, tree=tree, 
+                                                branches=self.key_name)
 
         # Index each hit
         self.hits_index_name = self.prefix + "hits_index"
@@ -91,10 +101,10 @@ class FlatHits(object):
         event_index_column = [self.hits_to_events]
 
         # Zip it all together in a record array
-        self.all_branches = branches + [self.n_hits_name] +\
+        self.all_branches = branches + [self.key_name] +\
                                        [self.hits_index_name] +\
                                        [self.event_index_name]
-        self.data = data_columns + all_n_hits_column + hits_index_column +\
+        self.data = data_columns + all_key_column + hits_index_column +\
                     event_index_column
 
         # Finialize the data if this is the final form
@@ -175,10 +185,15 @@ class FlatHits(object):
         # Grab the branches one by one to save on memory
         data_columns = []
         for branch in branches:
+            # Count the number of entries to grab
+            if self.use_evt_idx:
+                n_entries = sum(self.event_to_n_hits[:self.n_events])
+            else:
+                n_entries = self.n_events
             # Grab the branch
-            event_data = root2array(path, treename=tree,\
+            event_data = root2array(path, treename=tree, \
                                     branches=[branch],
-                                    start=0, stop=self.n_events)
+                                    start=0, stop=n_entries)
             # If we know the number of hits and events, require the branch is as
             # long as one of these
             if (self.n_hits is not None) and (self.n_events is not None):
@@ -242,30 +257,39 @@ class FlatHits(object):
         hits_to_events = hits_to_events.astype(int)
         return hits_to_events, event_to_hits
 
-    def _get_n_hits_flat(self, path, tree, ):
+    def _get_event_to_n_hits(self, path, tree):
         """
-        Creates look up tables to map from events to hits index and from
-        hit to event number
-        """
-        _ = self._check_for_branches
- 
-
-    def _get_event_to_hits_lookup(self, path, tree, flat=False):
-        """
-        Creates look up tables to map from events to hits index and from
-        hit to event number
+        Creates look up tables to map from event index to number of hits 
         """
         # Check the branch we need to define the number of hits is there
-        _ = self._check_for_branches(path, tree, branches=[self.n_hits_name])
+        _ = self._check_for_branches(path, tree, branches=[self.key_name])
         # Import the data
         event_data = root2array(path, treename=tree,
-                                branches=[self.n_hits_name],
-                                start=0, stop=self.n_events)
-        # Store the number of hits in each event
-        event_to_n_hits = event_data[self.n_hits_name].copy().astype(int)
+                                branches=[self.key_name])
+        event_data = event_data[self.key_name]
+        # Return the number of hits in each event
+        if self.use_evt_idx:
+            # Check the hits are sorted by event
+            assert np.array_equal(event_data, np.sort(event_data)),\
+                "Event index named {} not sorted".format(self.key_name)
+            # Return the number of hits in each event
+            event_to_n_hits = np.array(Counter(event_data).items())[:,1]
+        else:
+            # Assume number of hits per event is stored already
+            event_to_n_hits = event_data.copy().astype(int)
+        # Trim to the requested number of events
+        return event_to_n_hits[:self.n_events]
+
+    def _get_event_to_hits_lookup(self, path, tree):
+        """
+        Creates look up tables to map from events to hits index and from
+        hit to event number
+        """
+        # Get the number of hits for each event
+        event_to_n_hits = self._get_event_to_n_hits(path, tree)
         # Create a look up table that maps from event number the range of hits
         # IDs in that event
-        hits_to_events, event_to_hits =\
+        hits_to_events, event_to_hits = \
                                   self._generate_lookup_tables(event_to_n_hits)
         # Return the lookup tables
         return hits_to_events, event_to_hits, event_to_n_hits
@@ -421,11 +445,24 @@ class GeomHits(FlatHits):
     # pylint: disable=bad-continuation
     # pylint: disable=relative-import
     # pylint: disable=unbalanced-tuple-unpacking
-    def __init__(self, geom, path="../data/signal.root", tree='tree', n_evts=-1,
-                 branches=None, prefix="CdcCell_", hit_type_name="hittype",
-                 n_hits_name="nHits", row_name="layerID", idx_name="cellID",
-                 edep_name="edep", time_name="t", flat_name="vol_id",
-                 trig_name="mt", signal_coding=1, finalize_data=True):
+    def __init__(self,
+                 geom,
+                 path="../data/signal.root",
+                 tree='tree',
+                 n_evts=-1,
+                 branches=None,
+                 prefix="CdcCell_",
+                 hit_type_name="hittype",
+                 key_name="nHits",
+                 use_evt_idx=True,
+                 row_name="layerID",
+                 idx_name="cellID",
+                 edep_name="edep",
+                 time_name="t",
+                 flat_name="vol_id",
+                 trig_name="mt",
+                 signal_coding=1,
+                 finalize_data=True):
         """
         This generates hit data in a structured array from an input root file
         from a file. It assumes that the hits are associated to some geometrical
@@ -440,10 +477,17 @@ class GeomHits(FlatHits):
         :param signal_coding: value in hit_type_name branch that signifies a
                               signal hit
         """
-        FlatHits.__init__(self, path=path, tree=tree, prefix=prefix,
-                          branches=branches, hit_type_name=hit_type_name,
-                          n_hits_name=n_hits_name, signal_coding=signal_coding,
-                          finalize_data=False, n_evts=n_evts)
+        FlatHits.__init__(self,
+                          path=path,
+                          tree=tree,
+                          prefix=prefix,
+                          branches=branches,
+                          hit_type_name=hit_type_name,
+                          key_name=key_name,
+                          use_evt_idx=use_evt_idx,
+                          signal_coding=signal_coding,
+                          finalize_data=False,
+                          n_evts=n_evts)
 
         # Get the geometry flat_IDs
         self.row_name = self.prefix + row_name
@@ -649,11 +693,24 @@ class CyDetHits(GeomHits):
     # pylint: disable=too-many-instance-attributes
     # pylint: disable=bad-continuation
     # pylint: disable=relative-import
-    def __init__(self, path="../data/signal.root", tree='tree', branches=None,
-                 prefix="CdcCell_", hit_type_name="hittype", n_hits_name="nHits",
-                 row_name="layerID", idx_name="cellID", flat_name="vol_id",
-                 time_name="tstart", edep_name="edep", trig_name="mt",
-                 signal_coding=1, finalize_data=True, n_evts=-1, time_offset=0):
+    def __init__(self,
+                 path="../data/signal.root",
+                 tree='tree',
+                 branches=None,
+                 prefix="CdcCell_",
+                 hit_type_name="hittype",
+                 key_name="nHits",
+                 use_evt_idx=True,
+                 row_name="layerID",
+                 idx_name="cellID",
+                 flat_name="vol_id",
+                 time_name="tstart",
+                 edep_name="edep",
+                 trig_name="mt",
+                 signal_coding=1,
+                 finalize_data=True,
+                 n_evts=-1,
+                 time_offset=0):
         """
         This generates hit data in a structured array from an input root file
         from a file. It assumes the naming convention "CdcCell_"+ variable for
@@ -669,13 +726,23 @@ class CyDetHits(GeomHits):
         :param signal_coding: value in hit_type_name branch that signifies a
                               signal hit
         """
-        GeomHits.__init__(self, CyDet(), path=path, tree=tree,
-                          branches=branches, prefix=prefix,
-                          hit_type_name=hit_type_name, n_hits_name=n_hits_name,
-                          row_name=row_name, idx_name=idx_name,
-                          time_name=time_name, edep_name=edep_name,
-                          flat_name=flat_name, trig_name=trig_name,
-                          signal_coding=signal_coding, n_evts=n_evts,
+        GeomHits.__init__(self,
+                          CyDet(),
+                          path=path,
+                          tree=tree,
+                          branches=branches,
+                          prefix=prefix,
+                          hit_type_name=hit_type_name,
+                          key_name=key_name,
+                          use_evt_idx=use_evt_idx,
+                          row_name=row_name,
+                          idx_name=idx_name,
+                          time_name=time_name,
+                          edep_name=edep_name,
+                          flat_name=flat_name,
+                          trig_name=trig_name,
+                          signal_coding=signal_coding,
+                          n_evts=n_evts,
                           finalize_data=False)
 
         # Finialize the data if this is the final form
@@ -775,11 +842,22 @@ class CTHHits(GeomHits):
     # pylint: disable=too-many-instance-attributes
     # pylint: disable=bad-continuation
     # pylint: disable=relative-import
-    def __init__(self, path="../data/signal.root", tree='tree', branches=None,
-                 prefix="M_", hit_type_name="hittype", n_hits_name="nHits",
-                 row_name="volName", idx_name="volID", flat_name="vol_id",
-                 time_name="t", edep_name="edep", signal_coding=1,
-                 finalize_data=True, n_evts=-1):
+    def __init__(self,
+                 path="../data/signal.root",
+                 tree='tree',
+                 branches=None,
+                 prefix="M_",
+                 hit_type_name="hittype",
+                 key_name="nHits",
+                 use_evt_idx=True,
+                 row_name="volName",
+                 idx_name="volID",
+                 flat_name="vol_id",
+                 time_name="t",
+                 edep_name="edep",
+                 signal_coding=1,
+                 finalize_data=True,
+                 n_evts=-1):
         """
         This generates hit data in a structured array from an input root file
         from a file. It assumes the naming convention "M_"+ variable for
@@ -795,12 +873,22 @@ class CTHHits(GeomHits):
         :param signal_coding: value in hit_type_name branch that signifies a
                               signal hit
         """
-        GeomHits.__init__(self, CTH(), path=path, tree=tree, n_evts=n_evts,
-                          branches=branches, prefix=prefix,
-                          hit_type_name=hit_type_name, n_hits_name=n_hits_name,
-                          row_name=row_name, idx_name=idx_name,
-                          time_name=time_name, edep_name=edep_name,
-                          flat_name=flat_name, signal_coding=signal_coding,
+        GeomHits.__init__(self,
+                          CTH(),
+                          path=path,
+                          tree=tree,
+                          n_evts=n_evts,
+                          branches=branches,
+                          prefix=prefix,
+                          hit_type_name=hit_type_name,
+                          key_name=key_name,
+                          use_evt_idx=use_evt_idx,
+                          row_name=row_name,
+                          idx_name=idx_name,
+                          time_name=time_name,
+                          edep_name=edep_name,
+                          flat_name=flat_name,
+                          signal_coding=signal_coding,
                           finalize_data=False)
 
         # Add labels for upstream and downstream CTH setups
@@ -889,7 +977,9 @@ class CDCHits(FlatHits):
     # pylint: disable=too-many-instance-attributes
     # pylint: disable=bad-continuation
     # pylint: disable=relative-import
-    def __init__(self, cydet_hits, cth_hits):
+    def __init__(self,
+                 cydet_hits,
+                 cth_hits):
         """
         A class to support overlaying hit classes of the same type.  This will
         returned the combined event from each of the underlying hit classes.
@@ -970,14 +1060,20 @@ class HitsMerger(CyDetHits):
     # pylint: disable=too-many-instance-attributes
     # pylint: disable=bad-continuation
     # pylint: disable=relative-import
-    def __init__(self, sig_class, path, tree, this_class="cydet",
-            force_time_accept=True):
+    def __init__(self,
+                 sig_class,
+                 path,
+                 tree,
+                 this_class="cydet",
+                 force_time_accept=True):
         """
         A class to support overlaying hit classes of the same type.  This will
         returned the combined event from each of the underlying hit classes.
 
         """
-        CyDetHits.__init__(self, path=path, tree=tree)
+        CyDetHits.__init__(self,
+                           path=path,
+                           tree=tree)
 
 
         # Ensure they are the same type of hits class
