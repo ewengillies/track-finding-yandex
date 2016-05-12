@@ -18,10 +18,10 @@ class FlatHits(object):
     def __init__(self,
                  path="../data/151208_SimChen_noise.root",
                  tree='tree',
-                 prefix="CdcCell_",
+                 prefix="CDCHit.f",
                  branches=None,
-                 hit_type_name="hittype",
-                 key_name="nHits",
+                 hit_type_name="HitType",
+                 key_name="EventNumber",
                  use_evt_idx=True,
                  signal_coding=1,
                  finalize_data=True,
@@ -73,7 +73,7 @@ class FlatHits(object):
 
         # Initialize our data and look up tables
         self.hits_to_events, self.event_to_hits, self.event_to_n_hits =\
-            self._get_event_to_hits_lookup(path, 
+            self._get_event_to_hits_lookup(path,
                                            tree=tree)
 
         # Set the number of hits and events for this data
@@ -89,7 +89,7 @@ class FlatHits(object):
             data_columns = []
 
         # Label each hit with the number of hits in its event
-        all_key_column = self._import_root_file(path, tree=tree, 
+        all_key_column = self._import_root_file(path, tree=tree,
                                                 branches=self.key_name)
 
         # Index each hit
@@ -259,7 +259,7 @@ class FlatHits(object):
 
     def _get_event_to_n_hits(self, path, tree):
         """
-        Creates look up tables to map from event index to number of hits 
+        Creates look up tables to map from event index to number of hits
         """
         # Check the branch we need to define the number of hits is there
         _ = self._check_for_branches(path, tree, branches=[self.key_name])
@@ -380,8 +380,7 @@ class FlatHits(object):
         # Get the relevant hits to keep
         mask = self._get_mask(these_hits=self.data, variable=variable,
                               values=values, greater_than=greater_than,
-                              less_than=less_than, invert=False)
-        #TODO check this!!  Especially use of min_length
+                              less_than=less_than, invert=invert)
         # Find the hits to remove
         remove_mask = np.logical_not(mask)
         n_hits_removed = np.bincount(self.hits_to_events[remove_mask],
@@ -451,16 +450,16 @@ class GeomHits(FlatHits):
                  tree='tree',
                  n_evts=-1,
                  branches=None,
-                 prefix="CdcCell_",
-                 hit_type_name="hittype",
-                 key_name="nHits",
+                 prefix="CDCHit.f",
+                 hit_type_name="HitType",
+                 key_name="EventNumber",
                  use_evt_idx=True,
                  row_name="layerID",
                  idx_name="cellID",
-                 edep_name="edep",
+                 edep_name="Charge",
                  time_name="t",
                  flat_name="vol_id",
-                 trig_name="mt",
+                 trig_name="TrigTime",
                  signal_coding=1,
                  finalize_data=True):
         """
@@ -674,7 +673,7 @@ class GeomHits(FlatHits):
         :return: numpy.array of shape [CyDet.n_points]
         """
         # Check the trigger time has been set
-        assert "CdcCell_mt" in self.all_branches,\
+        assert "CDCHit.fTrigTime" in self.all_branches,\
                 "Trigger time has not been set yet"
         return self.get_measurement(events, self.trig_name)
 
@@ -697,23 +696,24 @@ class CyDetHits(GeomHits):
                  path="../data/signal.root",
                  tree='tree',
                  branches=None,
-                 prefix="CdcCell_",
-                 hit_type_name="hittype",
-                 key_name="nHits",
+                 prefix="CDCHit.f",
+                 hit_type_name="HitType",
+                 key_name="EventNumber",
                  use_evt_idx=True,
                  row_name="layerID",
                  idx_name="cellID",
+                 chan_name="Channel",
                  flat_name="vol_id",
-                 time_name="tstart",
-                 edep_name="edep",
-                 trig_name="mt",
+                 time_name="MCPos.fE",
+                 edep_name="Charge",
+                 trig_name="TrigTime",
                  signal_coding=1,
                  finalize_data=True,
                  n_evts=-1,
                  time_offset=0):
         """
         This generates hit data in a structured array from an input root file
-        from a file. It assumes the naming convention "CdcCell_"+ variable for
+        from a file. It assumes the naming convention "CDCHit.f"+ variable for
         all leaves. It overlays its data on the uses the CyDet class to define
         its geometry.
 
@@ -726,6 +726,10 @@ class CyDetHits(GeomHits):
         :param signal_coding: value in hit_type_name branch that signifies a
                               signal hit
         """
+        # Set the channel name for the flat_ids
+        # TODO this is ugly, please clear out the look up table business
+        self.chan_name = prefix + chan_name
+        # Build the geom hits object
         GeomHits.__init__(self,
                           CyDet(),
                           path=path,
@@ -745,10 +749,27 @@ class CyDetHits(GeomHits):
                           n_evts=n_evts,
                           finalize_data=False)
 
+        print "I know about the changes!!"
+
         # Finialize the data if this is the final form
         if finalize_data:
             self._finalize_data()
         self.time_offset = time_offset
+
+    def _get_geom_flat_ids(self, path, tree):
+        """
+        Labels each hit by flattened geometry ID to replace the use of volume
+        row and volume index
+        """
+        # Check if chan_name is present is the root file
+        has_chan = self._check_for_branches(path, tree,
+                                            branches=[self.chan_name],
+                                            soft_check=True)
+        if has_chan:
+            return self._import_root_file(path, tree,
+                                          branches=[self.chan_name])[0]
+        else:
+            return super(CyDetHits, self)._get_geom_flat_ids(path, tree)
 
     def get_measurement(self, events, name):
         """
@@ -847,14 +868,14 @@ class CTHHits(GeomHits):
                  tree='tree',
                  branches=None,
                  prefix="M_",
-                 hit_type_name="hittype",
-                 key_name="nHits",
+                 hit_type_name="HitType",
+                 key_name="EventNumber",
                  use_evt_idx=True,
                  row_name="volName",
                  idx_name="volID",
                  flat_name="vol_id",
                  time_name="t",
-                 edep_name="edep",
+                 edep_name="Charge",
                  signal_coding=1,
                  finalize_data=True,
                  n_evts=-1):
