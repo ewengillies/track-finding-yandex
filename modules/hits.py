@@ -874,6 +874,7 @@ class CTHHits(GeomHits):
                  row_name="volName",
                  idx_name="volID",
                  flat_name="vol_id",
+                 #TODO fix this default time name
                  time_name="t",
                  edep_name="Charge",
                  signal_coding=1,
