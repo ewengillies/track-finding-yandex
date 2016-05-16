@@ -115,8 +115,6 @@ class FlatHits(object):
         """
         Trim the lookup tables to the given event indexes
         """
-        # Check which events were already removed
-
         # Trim the event indexed tables
         self.event_to_n_hits = self.event_to_n_hits[events]
         self.hits_to_events, self.event_to_hits =\
@@ -294,6 +292,13 @@ class FlatHits(object):
         # Return the lookup tables
         return hits_to_events, event_to_hits, event_to_n_hits
 
+    def _set_indexes(self):
+        '''
+        Reset the hit and event indexes
+        '''
+        self.data[self.hits_index_name] = np.arange(self.n_hits)
+        self.data[self.event_index_name] = self.hits_to_events
+
     def sort_hits(self, variable, ascending=True, reset_index=True):
         """
         Sorts the hits by the given variable inside each event.  By default,
@@ -388,12 +393,12 @@ class FlatHits(object):
         # Remove these sums
         self.event_to_n_hits -= n_hits_removed
         assert (self.event_to_n_hits >= 0).all(),\
-                "Negative number of events not allowed!"
-        self.hits_to_events, self.event_to_hits =\
-            self._generate_lookup_tables(self.event_to_n_hits)
+                "Negative number of hits not allowed!"
+        # Remove the hits
         self.data = self.data[mask]
-        self.n_hits = len(self.data)
-        self.n_events = len(self.event_to_hits)
+        # Trim the look up tables of empty events 
+        empty_events = np.where(self.event_to_n_hits > 0)[0]
+        self._trim_lookup_tables(empty_events)
 
     def trim_events(self, events):
         """
@@ -748,8 +753,6 @@ class CyDetHits(GeomHits):
                           signal_coding=signal_coding,
                           n_evts=n_evts,
                           finalize_data=False)
-
-        print "I know about the changes!!"
 
         # Finialize the data if this is the final form
         if finalize_data:
