@@ -33,7 +33,7 @@ class CylindricalArray(object):
                               layer
 
         """
-        self.n_by_layer = n_by_layer
+        self.n_by_layer = np.array(n_by_layer)
         self.r_by_layer = r_by_layer
         self.phi0_by_layer = phi0_by_layer
         self.n_points = sum(self.n_by_layer)
@@ -42,8 +42,9 @@ class CylindricalArray(object):
         self.dphi_by_layer = self._prepare_dphi_by_layer()
         self.point_lookup = self._prepare_points_lookup()
         self.point_rhos = self._prepare_point_rho()
-        self.point_layers = np.round(((self.point_rhos - self.point_rhos[0])/1.6))
-        self.point_layers = self.point_layers.astype(int)
+        self.point_layers = np.repeat(np.arange(self.n_by_layer.size),
+                                          self.n_by_layer) 
+        self.point_indexes = self.get_indexes(self.n_points)
         self.point_phis = self._prepare_point_phi()
         self.point_x, self.point_y = self._prepare_point_cartesian()
         self.point_pol = self._prepare_polarity()
@@ -244,27 +245,25 @@ class CylindricalArray(object):
         """
         return self.point_x, self.point_y
 
-    def get_layer(self, point_id):
+    def get_layers(self, point_id):
         """
         Returns the layer index of a given point_id
 
         :return: Index of layer where point_id is
         """
-        rho = self.point_rhos[point_id]
-        layer = int(np.where(self.r_by_layer == rho)[0])
-        return layer
+        return self.point_layers[point_id]
 
-    def get_index(self, point_id):
+    def get_indexes(self, point_id):
         """
         Returns the point index of a given point_id
 
         :return: Index of layer where point_id is
         """
-        layer = self.get_layer(point_id)
+        layer = self.get_layers(point_id)
         index = point_id - self.first_point[layer]
         return index
 
-    def shift_wire(self, point_id, shift_size):
+    def shift_wires(self, point_id, shift_size):
         """
         Get the index of the wire that is displaced from point_id by
         shift_size points counter clockwise in the same layer,
@@ -272,8 +271,8 @@ class CylindricalArray(object):
 
         :return: index of point shift_size  counter clockwise of point_id
         """
-        layer = self.get_layer(point_id)
-        index = self.get_index(point_id)
+        layer = self.get_layers(point_id)
+        index = self.get_indexes(point_id)
         index += shift_size
         index %= self.n_by_layer[layer]
         new_point = self.point_lookup[layer, index]
@@ -289,8 +288,8 @@ class CylindricalArray(object):
         :return: index of point n_points_in_layer*shft_frac points
                  counter clockwise of point_id
         """
-        layer = self.get_layer(point_id)
-        index = self.get_index(point_id)
+        layer = self.get_layers(point_id)
+        index = self.get_indexes(point_id)
         n_points_in_layer = self.n_by_layer[layer]
         shift_size = int(round(shift_frac * (n_points_in_layer-1)))
         index += shift_size
