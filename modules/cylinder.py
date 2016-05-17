@@ -44,7 +44,7 @@ class CylindricalArray(object):
         self.point_rhos = self._prepare_point_rho()
         self.point_layers = np.repeat(np.arange(self.n_by_layer.size),
                                           self.n_by_layer) 
-        self.point_indexes = np.arange(self.n_points) -
+        self.point_indexes = np.arange(self.n_points) - \
                              self.first_point[self.point_layers]
         self.point_phis = self._prepare_point_phi()
         self.point_x, self.point_y = self._prepare_point_cartesian()
@@ -262,7 +262,7 @@ class CylindricalArray(object):
         """
         return self.point_indexes[point_id]
 
-    def shift_wires(self, shift_size, point_id=np.arange(self.n_points)):
+    def shift_wires(self, shift_size, point_id=None):
         """
         Get the index of the wire that is displaced from point_id by
         shift_size points counter clockwise in the same layer,
@@ -270,6 +270,8 @@ class CylindricalArray(object):
 
         :return: index of point shift_size  counter clockwise of point_id
         """
+        if point_id is None:
+            point_id = np.arange(self.n_points)
         layer = self.get_layers(point_id)
         index = self.get_indexes(point_id)
         index += shift_size
