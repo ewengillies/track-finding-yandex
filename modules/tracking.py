@@ -271,7 +271,7 @@ class HoughTransformer(object):
         self.image_mean = hough_images.mean()
         return self
 
-    def transform(self, trans_wires):
+    def transform(self, trans_wires, only_hits=True, flatten=True):
         """
         Transform the data according to the fit
 
@@ -281,6 +281,10 @@ class HoughTransformer(object):
         """
         # Center the input distribution around 0
         original = trans_wires - self.wire_mean
+        # Record the wires with hits if need be
+        # TODO clean this up, i.e. check it always works etc
+        if only_hits:
+            hit_wires = np.nonzero(trans_wires)
         # Perform the hough transform
         hough_images = self.normed_corresp.T.dot(original.T).T
         # Remove the bottom min_percentile shift the remaining range to [0-1]
@@ -294,6 +298,10 @@ class HoughTransformer(object):
         hough_images -= self.image_mean
         # Inverse hough transform
         after_hough = self.normed_corresp.dot(hough_images.T).T
+        if only_hits:
+            after_hough = after_hough[hit_wires]
+        if flatten:
+            after_hough = after_hough.flatten()
         return after_hough, hough_images
 
 class HoughShifter(object):
