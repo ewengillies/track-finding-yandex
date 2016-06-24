@@ -260,7 +260,7 @@ class FlatHits(object):
             assert np.array_equal(event_data, np.sort(event_data)),\
                 "Event index named {} not sorted".format(self.key_name)
             # Return the number of hits in each event
-            _ , event_to_n_hits = np.unique(event_data, return_counts=True)
+            _, event_to_n_hits = np.unique(event_data, return_counts=True)
         else:
             # Assume number of hits per event is stored already
             event_to_n_hits = event_data.copy().astype(int)
@@ -515,7 +515,7 @@ class GeomHits(FlatHits):
                  row_name="layerID",
                  idx_name="cellID",
                  edep_name="Charge",
-                 time_name="MCPos.fE",
+                 time_name="DetectedTime",
                  flat_name="vol_id",
                  trig_name="TrigTime",
                  finalize_data=True,
