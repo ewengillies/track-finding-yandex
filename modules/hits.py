@@ -28,6 +28,7 @@ class FlatHits(object):
     def __init__(self,
                  path,
                  tree='COMETEventsSummary',
+                 selection=None,
                  prefix="CDCHit.f",
                  branches=None,
                  empty_branches=None,
@@ -63,6 +64,7 @@ class FlatHits(object):
         self.signal_coding = signal_coding
         self.n_events = n_evts
         self.use_evt_idx = use_evt_idx
+        self.selection = selection
         # Set the number of hits, the number of events, and data to None so that
         # the the next import_root_file knows its the first call
         self.n_hits, self.data = (None, None)
@@ -104,7 +106,7 @@ class FlatHits(object):
         else:
             data_columns = []
 
-        # Label each hit with the number of hits in its event
+        # Label each hit with the number of hits its import key
         all_key_column = self._import_root_file(path, tree=tree,
                                                 branches=self.key_name)
 
@@ -127,7 +129,10 @@ class FlatHits(object):
         # TODO fix hack
         empty_branches = np.unique(empty_branches)
         for branch in empty_branches:
-            self.data += [np.zeros(self.n_hits)]
+            if branch == self.hit_type_name:
+                self.data += [np.zeros(self.n_hits, dtype=bool)]
+            else:
+                self.data += [np.zeros(self.n_hits)]
             self.all_branches += [branch]
 
         # Finialize the data if this is the final form
@@ -145,6 +150,7 @@ class FlatHits(object):
         """
         # Import one event with all the branches to get the names of the
         # branches
+        # TODO use list_branches in root2array here
         dummy_root = root2array(path, treename=tree, start=0, stop=1)
         # Get the names of the imported branches
         availible_branches = dummy_root.dtype.names
@@ -198,14 +204,15 @@ class FlatHits(object):
         data_columns = []
         for branch in branches:
             # Count the number of entries to grab
-            if self.use_evt_idx:
-                n_entries = sum(self.event_to_n_hits[:self.n_events])
-            else:
-                n_entries = self.n_events
+            #if self.use_evt_idx:
+            #    n_entries = sum(self.event_to_n_hits[:self.n_events])
+            #else:
+            #    n_entries = self.n_events
+            # TODO absorb event loading limit into selection
             # Grab the branch
             event_data = root2array(path, treename=tree, \
                                     branches=[branch],
-                                    start=0, stop=n_entries)
+                                    selection=self.selection)
             # If we know the number of hits and events, require the branch is as
             # long as one of these
             if (self.n_hits is not None) and (self.n_events is not None):
@@ -231,9 +238,13 @@ class FlatHits(object):
                 # Check that the length of the array makes sense
                 assert (data_length == self.n_hits) or\
                        (data_length == self.n_events),\
-                       "ERROR: The length of the data in the requested "+\
-                       "branch " + branch + " is not the length of the "+\
-                       "number of events or the number of hits"
+                       "ERROR: The length of the data in the requested \n"+\
+                       "branch " + branch + " is not the length of the \n"+\
+                       "number of events or the number of hits.\n"+\
+                       "Entries in branch = {}\n".format(data_length)+\
+                       "Hits in sample = {}\n".format(self.n_hits)+\
+                       "Events in sample = {}\n".format(self.n_events)
+
                 # Add this branch
                 data_columns.append(event_data)
             # If we do not know the number of hits and events, assume its
@@ -252,7 +263,8 @@ class FlatHits(object):
         _ = self._check_for_branches(path, tree, branches=[self.key_name])
         # Import the data
         event_data = root2array(path, treename=tree,
-                                branches=[self.key_name])
+                                branches=[self.key_name],
+                                selection=self.selection)
         event_data = event_data[self.key_name]
         # Return the number of hits in each event
         if self.use_evt_idx:
@@ -542,10 +554,11 @@ class GeomHits(FlatHits):
                                                               self.trig_name,
                                                               branches,
                                                               empty_branches)
+        # TODO move flat hits to the end
         # Initialize the base class
         FlatHits.__init__(self,
                           path,
-                          tree='COMETEventsSummary',
+                          tree=tree,
                           branches=branches,
                           empty_branches=empty_branches,
                           finalize_data=False,
@@ -769,7 +782,7 @@ class CyDetHits(GeomHits):
         GeomHits.__init__(self,
                           CyDet(),
                           path,
-                          tree='COMETEventsSummary',
+                          tree=tree,
                           prefix=prefix,
                           finalize_data=False,
                           **kwargs)
@@ -929,7 +942,7 @@ class CTHHits(GeomHits):
         GeomHits.__init__(self,
                           CTH(),
                           path,
-                          tree='COMETEventsSummary',
+                          tree=tree,
                           prefix=prefix,
                           finalize_data=False,
                           **kwargs)
