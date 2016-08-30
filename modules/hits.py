@@ -1,10 +1,6 @@
 import numpy as np
-import numpy.lib.recfunctions
 from root_numpy import root2array
 from cylinder import CyDet, CTH
-from random import Random
-from collections import Counter
-
 """
 Notation used below:
  - wire_id is flat enumerator of all wires
@@ -32,7 +28,7 @@ class FlatHits(object):
                  prefix="CDCHit.f",
                  branches=None,
                  empty_branches=None,
-                 hit_type_name="HitType",
+                 hit_type_name="IsSig",
                  key_name="EventNumber",
                  use_evt_idx=True,
                  signal_coding=1,
@@ -408,12 +404,7 @@ class FlatHits(object):
         """
         Keep these events in the data
         """
-        # TODO have this operate on event_index
-        keep_hits = np.concatenate(self.event_to_hits[events])
-        keep_hits = keep_hits.astype(int)
-        self.data = self.data[keep_hits]
-        self._trim_lookup_tables(events)
-
+        self.trim_hits(self.key_name, values=events)
 
     def sort_hits(self, variable, ascending=True, reset_index=True):
         """
@@ -561,6 +552,7 @@ class GeomHits(FlatHits):
                           tree=tree,
                           branches=branches,
                           empty_branches=empty_branches,
+                          prefix=prefix,
                           finalize_data=False,
                           **kwargs)
 
@@ -921,7 +913,10 @@ class CTHHits(GeomHits):
     def __init__(self,
                  path,
                  tree='COMETEventsSummary',
-                 prefix="CTHHits.f",
+                 prefix="CTHHit.f",
+                 row_name="Channel",
+                 idx_name="Counter",
+                 time_name="MCPos.fE",
                  finalize_data=True,
                  **kwargs):
         """
@@ -944,6 +939,9 @@ class CTHHits(GeomHits):
                           path,
                           tree=tree,
                           prefix=prefix,
+                          row_name=row_name,
+                          idx_name=idx_name,
+                          time_name=time_name,
                           finalize_data=False,
                           **kwargs)
 
@@ -978,14 +976,12 @@ class CTHHits(GeomHits):
         row and volume index
         """
         # Import the data
-        row_data, idx_data = self._import_root_file(path, tree=tree,
-                                                    branches=[self.row_name,
-                                                              self.idx_name])
-        # Pull out the names of the volumes, removing the tag
-        for tag in ['U', 'D']:
-            row_data = np.char.rstrip(row_data.astype(str), tag)
+        chan_data = self._import_root_file(path, tree=tree,
+                                           branches=[self.row_name])[0]
+        idx_data = self._import_root_file(path, tree=tree,
+                                          branches=[self.idx_name])[0]
         # Map from volume names to row indexes
-        row_data = np.vectorize(self.geom.name_to_row.get)(row_data)
+        row_data = np.vectorize(self.geom.chan_to_row)(chan_data)
         # Flatten the volume names and IDs to flat_voldIDs
         flat_ids = np.zeros(self.n_hits)
         for row, idx, hit in zip(row_data, idx_data, range(self.n_hits)):
@@ -999,15 +995,10 @@ class CTHHits(GeomHits):
         Labels each hit by if it a part of the upstream or downstream hodoscope
         """
         # Import the data
-        z_pos_data = self._import_root_file(path, tree=tree,
-                                            branches=[self.row_name])
-        # Strip the volume names to tag the data as upstream or downstream
-        z_pos_data = np.array(z_pos_data).astype(str)
-        # Start with the active ones
-        for vol in self.geom.active_names + self.geom.passive_names:
-            z_pos_data = np.char.lstrip(z_pos_data.astype(str), vol)
-        # Move to the passive ones
-        z_pos_data = np.vectorize(self.geom.pos_to_col.get)(z_pos_data)
+        chan_data = self._import_root_file(path, tree=tree,
+                                           branches=[self.row_name])
+        # Get the z position flag
+        z_pos_data = np.vectorize(self.geom.chan_to_module)(chan_data)
         return z_pos_data
 
     def get_events(self, events=None, unique=True, hodoscope="both"):
@@ -1038,12 +1029,20 @@ class CDCHits(FlatHits):
         """
         A class to support overlaying hit classes of the same type.  This will
         returned the combined event from each of the underlying hit classes.
-
         """
         # TODO assertion here
         self.cth = cth_hits
         self.cydet = cydet_hits
+        self.keep_common_events()
         self.n_events = min(self.cydet.n_events, self.cth.n_events)
+
+    def keep_common_events(self):
+        """
+        Trim all events by event index so that they have the same events
+        """
+        shared_evts = np.intersect1d(self.cydet.get_events()[self.cydet.key_name],
+                                     self.cth.get_events()[self.cth.key_name])
+        self.trim_events(shared_evts)
 
     def print_branches(self):
         """
@@ -1057,7 +1056,7 @@ class CDCHits(FlatHits):
 
     def trim_events(self, events):
         """
-        Remove these events from the data
+        Keep these events in the data
         """
         self.cydet.trim_events(events)
         self.cth.trim_events(events)

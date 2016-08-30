@@ -372,11 +372,10 @@ class CyDet(CylindricalArray):
             "Abs. Diff. {} \n".format(self.phi_shft)+\
             "Reqs. Ang. {} \n".format(this_theta)
         return abs(radius*np.cos(self.phi_shft/2.)/np.cos(self.phi_shft/2. - this_theta))
-        
 
 class CTH(CylindricalArray):
     # pylint: disable=too-many-instance-attributes
-    def __init__(self, left_handed=False):
+    def __init__(self, left_handed=True):
         """
         Defines the CTH geometry.  Note Cherenkov counter and light guide read
         out to the same volume here
@@ -386,38 +385,50 @@ class CTH(CylindricalArray):
         # The first two rows are for the active volumes, third is for excluded
         # volumes
         cth_n_vols = [self.n_crystals, self.n_crystals, self.n_crystals]
-        cth_radii = [44.8, 48.5, 0.0]
-        cth_phi0 = [-90., -90., -90.]
+        cth_radii = [44.8, 48.28, 0.0]
+        cth_phi0 = [(-360/(2.*self.n_crystals)) * np.pi/180.,
+                    (-360/(2.*self.n_crystals)) * np.pi/180.,
+                    (-360/(2.*self.n_crystals)) * np.pi/180.]
         CylindricalArray.__init__(self, cth_n_vols, cth_radii, cth_phi0)
 
-        # Store the active volume names
-        self.chrn_name = "TriChe"
-        self.chlg_name = "TriCheL"
-        self.scnt_name = "TriSci"
-        self.active_names = [self.chrn_name, self.chlg_name, self.scnt_name]
+    def _get_channel_bits(self, channel):
+        """
+        Get the integer representation of the 10 most significant bits of the
+        channel id
+        """
+        return int("{0:025b}".format(channel)[:10], 2)
 
-        # Store the passive volume names
-        self.chpm_name = "TriCheP"
-        self.scpm_name = "TriSciP"
-        self.sclg_name = "TriSciL"
-        self.passive_names = [self.chpm_name, self.scpm_name, self.sclg_name]
+    def chan_to_row(self, channel):
+        """
+        Maps Cherenkov counters to 0, Cherenkov light guides to 0, Scintillators
+        to 1, Scintillator LG to 2
+        """
+        # Mask out the CTH channel bits
+        trimmed_channel = self._get_channel_bits(channel)
+        # LSB is light guide boolean mask
+        is_lg_mask = 1 << 0
+        # Next bit is scintillator mask
+        is_sc_mask = 1 << 1
+        # Map both cherenkov light guide and cherenkov counter to same volume
+        if not trimmed_channel & is_sc_mask:
+            return 0
+        # Map the scintillator to the next row
+        elif not trimmed_channel & is_lg_mask:
+            return 1
+        # Ignore the scintillator light guide
+        else:
+            return 2
 
-        # Map volume names to row indexes
-        self.name_to_row = dict()
-        # Cherenkov volumes to inner ring
-        self.name_to_row[self.chrn_name] = 0
-        # Map the cherenkov light guide volumes to the cherenkov volumes
-        self.name_to_row[self.chlg_name] =\
-                self.name_to_row[self.chrn_name]
-        # Map the scintillator to the outer ring
-        self.name_to_row[self.scnt_name] = 1
-        # Map the passive volumes to the passive row index
-        for vol in self.passive_names:
-            self.name_to_row[vol] = 2
-        # Position to column
-        self.pos_to_col = dict()
-        self.pos_to_col['U'] = 1
-        self.pos_to_col['D'] = 0
+    def chan_to_module(self, channel):
+        """
+        Return upstream or downstream module flag from channel ID
+        """
+        # Mask out the CTH channel bits
+        trimmed_channel = self._get_channel_bits(channel)
+        # LSB is light guide boolean mask
+        is_upstream = 1 << 9
+        return bool(trimmed_channel & is_upstream)
+
 
     def _prepare_dphi_by_layer(self):
         """
