@@ -43,7 +43,7 @@ class CylindricalArray(object):
         self.point_lookup = self._prepare_points_lookup()
         self.point_rhos = self._prepare_point_rho()
         self.point_layers = np.repeat(np.arange(self.n_by_layer.size),
-                                          self.n_by_layer) 
+                                          self.n_by_layer)
         self.point_indexes = np.arange(self.n_points) - \
                              self.first_point[self.point_layers]
         self.point_phis = self._prepare_point_phi()
@@ -306,7 +306,7 @@ class CyDet(CylindricalArray):
         """
         # Number of wires in each layer
         cydet_wires = [198, 204, 210, 216, 222, 228, 234, 240, 246,
-                       252, 258, 264, 270, 276, 282, 288, 294, 300] 
+                       252, 258, 264, 270, 276, 282, 288, 294, 300]
         # Radius at end plate
         cydet_radii = [53.0, 54.6, 56.2, 57.8, 59.4, 61.0, 62.6, 64.2, 65.8,
                        67.4, 69.0, 70.6, 72.2, 73.8, 75.4, 77.0, 78.6, 80.2]
@@ -315,10 +315,10 @@ class CyDet(CylindricalArray):
                       0.013426, 0.000000, 0.012771, 0.00000, 0.012177, 0.000000,
                       0.011636, 0.000000, 0.00000, 0.000000, 0.010686, 0.000000]
         # Define the maximum angular shift of the wires in each layer from end
-        # plate to the next  
+        # plate to the next
         self.phi_shft = np.array([-0.190400, 0.184800, -0.179520, 0.174533,
-                                  -0.169816, 0.165347, -0.161107, 0.157080, 
-                                  -0.153248, 0.149600, -0.146121, 0.142800, 
+                                  -0.169816, 0.165347, -0.161107, 0.157080,
+                                  -0.153248, 0.149600, -0.146121, 0.142800,
                                   -0.139626, 0.136591, -0.155966, 0.152716,
                                   -0.149600, 0.146608])
 
@@ -363,9 +363,9 @@ class CyDet(CylindricalArray):
         Get the new radial distance of a wire as a function of :
           * The total angular displacement of the wire-hole between end plates
           * The angle displacement subtended
-        
+
         Note the angular displacment subtended must be less than the total
-        angular displacement by definition.  
+        angular displacement by definition.
         """
         assert not np.any(np.abs(this_theta) > np.abs(self.phi_shft)),\
             "The input angle is larger than the absoulte angular difference\n"+\
@@ -384,11 +384,14 @@ class CTH(CylindricalArray):
         self.n_crystals = 64
         # The first two rows are for the active volumes, third is for excluded
         # volumes
-        cth_n_vols = [self.n_crystals, self.n_crystals, self.n_crystals]
-        cth_radii = [44.8, 48.28, 0.0]
+        cth_n_vols = [self.n_crystals, self.n_crystals,
+                      self.n_crystals, self.n_crystals, self.n_crystals]
+        cth_radii = [44.78, 48.28, 44.78, 48.28, 0]
         cth_phi0 = [(-360/(2.*self.n_crystals)) * np.pi/180.,
                     (-360/(2.*self.n_crystals)) * np.pi/180.,
-                    (-360/(2.*self.n_crystals)) * np.pi/180.]
+                    (-180 + 360/(2.*self.n_crystals)) * np.pi/180.,
+                    (-180 + 360/(2.*self.n_crystals)) * np.pi/180.,
+                    0]
         CylindricalArray.__init__(self, cth_n_vols, cth_radii, cth_phi0)
 
     def _get_channel_bits(self, channel):
@@ -400,24 +403,37 @@ class CTH(CylindricalArray):
 
     def chan_to_row(self, channel):
         """
-        Maps Cherenkov counters to 0, Cherenkov light guides to 0, Scintillators
-        to 1, Scintillator LG to 2
+        Maps :
+            Upstream:
+                Cherenkov counters and LG : 0
+                Scintillators             : 1
+                Scintillator LG           : 4
+            Downstream:
+                Cherenkov counters and LG : 2
+                Scintillators             : 3
+                Scintillator LG           : 4
         """
         # Mask out the CTH channel bits
         trimmed_channel = self._get_channel_bits(channel)
+        # MSB is upstream mask
+        is_upstream = 1 << 9
         # LSB is light guide boolean mask
         is_lg_mask = 1 << 0
         # Next bit is scintillator mask
         is_sc_mask = 1 << 1
+        # Map downstream to rows [3-5]
+        row_offset = 0
+        if not trimmed_channel & is_upstream:
+            row_offset = 2
         # Map both cherenkov light guide and cherenkov counter to same volume
         if not trimmed_channel & is_sc_mask:
-            return 0
+            return 0 + row_offset
         # Map the scintillator to the next row
         elif not trimmed_channel & is_lg_mask:
-            return 1
+            return 1 + row_offset
         # Ignore the scintillator light guide
         else:
-            return 2
+            return 4
 
     def chan_to_module(self, channel):
         """
@@ -436,7 +452,9 @@ class CTH(CylindricalArray):
         points in the layer
         """
         if self.left_handed:
-            return -2 * math.pi / np.asarray(self.n_by_layer)
+            # Downstream is left handed, upstream is right handed
+            handedness = np.asarray([-1, -1, 1, 1, 1])
+            return 2 * math.pi / (np.asarray(self.n_by_layer) * handedness)
         else:
             return 2 * math.pi / np.asarray(self.n_by_layer)
 

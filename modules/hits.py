@@ -945,15 +945,6 @@ class CTHHits(GeomHits):
                           finalize_data=False,
                           **kwargs)
 
-        # Add labels for upstream and downstream CTH setups
-        z_pos_column = self._get_geom_z_pos(path, tree)
-        self.data += [z_pos_column[0]]
-        self.z_pos_name = self.prefix + "position"
-        self.all_branches.append(self.z_pos_name)
-
-        # Initialize the up and down stream data holders
-        self.up_data, self.down_data = None, None
-
         if finalize_data:
             self._finalize_data()
 
@@ -965,10 +956,7 @@ class CTHHits(GeomHits):
         super(CTHHits, self)._finalize_data()
         # Remove passive volumes from the hit data
         # TODO fix passive volume hack
-        self.trim_hits(variable=self.flat_name, values=range(0, 64*2))
-        # Shortcut the upstream and downstream sections
-        self.up_data = self.filter_hits(self.data, self.z_pos_name, 1)
-        self.down_data = self.filter_hits(self.data, self.z_pos_name, 0)
+        self.trim_hits(variable=self.flat_name, values=range(0, 64*4))
 
     def _get_geom_flat_ids(self, path, tree):
         """
@@ -990,17 +978,6 @@ class CTHHits(GeomHits):
         flat_id_column = flat_ids.astype(int)
         return flat_id_column
 
-    def _get_geom_z_pos(self, path, tree):
-        """
-        Labels each hit by if it a part of the upstream or downstream hodoscope
-        """
-        # Import the data
-        chan_data = self._import_root_file(path, tree=tree,
-                                           branches=[self.row_name])
-        # Get the z position flag
-        z_pos_data = np.vectorize(self.geom.chan_to_module)(chan_data)
-        return z_pos_data
-
     def get_events(self, events=None, unique=True, hodoscope="both"):
         """
         Returns the hits from the given event(s).  Default gets all events
@@ -1013,10 +990,11 @@ class CTHHits(GeomHits):
                "Hodoscope "+ hodoscope +" selected.  This must be both, "+\
                " upstream, or downstream"
         events = super(self.__class__, self).get_events(events)
+        # TODO fix magic numbers for up and downstream data
         if hodoscope.startswith("up"):
-            events = self.filter_hits(events, self.z_pos_name, 1)
+            events = self.filter_hits(events, self.flat_name, less_than=128)
         elif hodoscope.startswith("down"):
-            events = self.filter_hits(events, self.z_pos_name, 0)
+            events = self.filter_hits(events, self.flat_name, greater_than=127)
         return events
 
 class CDCHits(FlatHits):
