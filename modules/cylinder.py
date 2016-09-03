@@ -314,6 +314,9 @@ class CyDet(CylindricalArray):
         cydet_phi0 = [0.015867, 0.015400, 0.000000, 0.014544, 0.00000, 0.000000,
                       0.013426, 0.000000, 0.012771, 0.00000, 0.012177, 0.000000,
                       0.011636, 0.000000, 0.00000, 0.000000, 0.010686, 0.000000]
+        # Add needed  180 degree shift for wire ID to match with global to local
+        # coordinate shift
+        cydet_phi0 = [phi_0 + np.pi for phi_0 in cydet_phi0]
         # Define the maximum angular shift of the wires in each layer from end
         # plate to the next
         self.phi_shft = np.array([-0.190400, 0.184800, -0.179520, 0.174533,
@@ -322,6 +325,7 @@ class CyDet(CylindricalArray):
                                   -0.139626, 0.136591, -0.155966, 0.152716,
                                   -0.149600, 0.146608])
 
+        cydet_phi0 = [p0 - ps/2. for p0, ps in zip(cydet_phi0, self.phi_shft)]
         dphi_from_phi0 = self.theta_at_rel_z(projection)
         new_radius = self.radius_at_theta(cydet_radii, dphi_from_phi0)
         new_dphi = dphi_from_phi0 + cydet_phi0
@@ -393,6 +397,20 @@ class CTH(CylindricalArray):
                     (-180 + 360/(2.*self.n_crystals)) * np.pi/180.,
                     0]
         CylindricalArray.__init__(self, cth_n_vols, cth_radii, cth_phi0)
+
+        # Get drawing parameters
+        ## WIDTH HEIGHT DEFLECTION_ANGLE
+        self.cherenkov_params = [1, 9, 20]
+        self.scintillator_params = [0.5, 9, 13]
+        # Convenience naming
+        self.cher_crys = self.point_lookup[0:4:2].flatten()
+        self.scin_crys = self.point_lookup[1:4:2].flatten()
+        self.up_crys = self.point_lookup[0:2].flatten()
+        self.up_cher = self.point_lookup[0]
+        self.up_scin = self.point_lookup[1]
+        self.down_crys = self.point_lookup[2:4].flatten()
+        self.down_cher = self.point_lookup[2]
+        self.down_scin = self.point_lookup[3]
 
     def _get_channel_bits(self, channel):
         """

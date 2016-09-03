@@ -669,7 +669,7 @@ class GeomHits(FlatHits):
         # Select the relevant event from data
         return self.get_hit_vols(events, unique, hit_type="back")
 
-    def get_hit_vector(self, events, unique=True):
+    def get_hit_vector(self, events):
         """
         Returns a vector denoting whether or not a wire has a hit on it. Returns
         1 for a hit, 0 for no hit
@@ -682,6 +682,22 @@ class GeomHits(FlatHits):
         # Make the hit vector
         hit_vector = np.zeros(self.geom.n_points)
         hit_vector[hit_vols] = 1
+        return hit_vector
+
+    def get_vol_types(self, events):
+        """
+        Get hits in all volumes by type, 1 is signal, 2 in background, nothing
+        is 0. Signal takes priority.
+
+        :return: numpy.array of shape [Geometry.n_points]
+        """
+        # Get the flat vol IDs for those vols with sig or bkg hits
+        bkg_vols = self.get_bkg_vols(events, unique=True)
+        sig_vols = self.get_sig_vols(events, unique=True)
+        # Make the hit vector
+        hit_vector = np.zeros(self.geom.n_points)
+        hit_vector[bkg_vols] = 2
+        hit_vector[sig_vols] = 1
         return hit_vector
 
     def get_hit_types(self, events, unique=True):
