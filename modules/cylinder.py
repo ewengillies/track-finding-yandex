@@ -299,34 +299,40 @@ class CylindricalArray(object):
         return new_point
 
 
-class CyDet(CylindricalArray):
+class CDC(CylindricalArray):
     def __init__(self, projection=0.5):
         """
         Defines the Cylindrical Detector Geometry
         """
         # Number of wires in each layer
-        cydet_wires = [198, 204, 210, 216, 222, 228, 234, 240, 246,
-                       252, 258, 264, 270, 276, 282, 288, 294, 300]
+        cdc_wires = [198, 204, 210, 216, 222, 228, 234, 240, 246,
+                     252, 258, 264, 270, 276, 282, 288, 294, 300]
         # Radius at end plate
-        cydet_radii = [53.0, 54.6, 56.2, 57.8, 59.4, 61.0, 62.6, 64.2, 65.8,
-                       67.4, 69.0, 70.6, 72.2, 73.8, 75.4, 77.0, 78.6, 80.2]
+        cdc_radii = [53.0, 54.6, 56.2, 57.8, 59.4, 61.0, 62.6, 64.2, 65.8,
+                     67.4, 69.0, 70.6, 72.2, 73.8, 75.4, 77.0, 78.6, 80.2]
         # Phi0 at end plate
-#        cydet_phi0 = [0.015867, 0.015400, 0.000000, 0.014544, 0.00000, 0.000000,
-#                      0.013426, 0.000000, 0.012771, 0.00000, 0.012177, 0.000000,
-#                     0.011636, 0.000000, 0.00000, 0.000000, 0.010686, 0.000000]
+        # cdc_phi0 = [0.015867, 0.015400,
+                     # 0.000000, 0.014544,
+                     # 0.00000, 0.000000,
+                     # 0.013426, 0.000000,
+                     # 0.012771, 0.00000,
+                     # 0.012177, 0.000000,
+                     # 0.011636, 0.000000,
+                     # 0.00000, 0.000000,
+                     # 0.010686, 0.000000]
         # Phi0 in the middle plane
-        cydet_phi0 = [-0.079333, 0.107800,
-                      -0.089760, 0.101810,
-                      -0.084908, 0.082674,
-                      -0.067127, 0.078540,
-                      -0.063853, 0.074800,
-                      -0.060884, 0.071400,
-                      -0.058177, 0.068296,
-                      -0.077983, 0.076358,
-                      -0.064114, 0.073304]
+        cdc_phi0 = [-0.079333, 0.107800,
+                    -0.089760, 0.101810,
+                    -0.084908, 0.082674,
+                    -0.067127, 0.078540,
+                    -0.063853, 0.074800,
+                    -0.060884, 0.071400,
+                    -0.058177, 0.068296,
+                    -0.077983, 0.076358,
+                    -0.064114, 0.073304]
         # Add needed  180 degree shift for wire ID to match with global to local
         # coordinate shift
-        cydet_phi0 = [phi_0 + np.pi for phi_0 in cydet_phi0]
+        cdc_phi0 = [phi_0 + np.pi for phi_0 in cdc_phi0]
         # Define the maximum angular shift of the wires in each layer from end
         # plate to the next
         self.phi_shft = np.array([-0.190400, 0.184800, -0.179520, 0.174533,
@@ -335,21 +341,21 @@ class CyDet(CylindricalArray):
                                   -0.139626, 0.136591, -0.155966, 0.152716,
                                   -0.149600, 0.146608])
 
-        cydet_phi0 = [p0 - ps/2. for p0, ps in zip(cydet_phi0, self.phi_shft)]
+        cdc_phi0 = [p0 - ps/2. for p0, ps in zip(cdc_phi0, self.phi_shft)]
         dphi_from_phi0 = self.theta_at_rel_z(projection)
-        new_radius = self.radius_at_theta(cydet_radii, dphi_from_phi0)
-        new_dphi = dphi_from_phi0 + cydet_phi0
+        new_radius = self.radius_at_theta(cdc_radii, dphi_from_phi0)
+        new_dphi = dphi_from_phi0 + cdc_phi0
 
         # Build the cylindrical array
-        CylindricalArray.__init__(self, cydet_wires, new_radius, new_dphi)
+        CylindricalArray.__init__(self, cdc_wires, new_radius, new_dphi)
 
     def theta_at_rel_z(self, z_dist, total_z=1.0):
         """
         Get the angular displacement of the wires in each layer as a function of
         the relative z_distance traversed
 
-        :param z_dist:   z distance down CyDet volume
-        :param total_z:  total z distance of CyDet volume
+        :param z_dist:   z distance down CDC volume
+        :param total_z:  total z distance of CDC volume
 
         :return: numpy array of angular shifts, one per layer
         """

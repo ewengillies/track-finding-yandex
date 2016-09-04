@@ -25,17 +25,17 @@ class HoughSpace(object):
         This class represents a Hough transform method. It initiates from a data
         file, and over lays a track center geometry on this.  It also defines a
         signal track radius. The track center geometry is defined so that only
-        track centers that yield signal tracks that pass through the CyDet and
+        track centers that yield signal tracks that pass through the CDC and
         the target are considered. The signal radius and target radius are
         defined by default to produce tracks whose maximal rho value can lie
         anywhere between the first and the last layer.
 
         This class calculates the probability that a given hit point in the
-        CyDet belongs to a track centered at a given point in the TrackCenters
+        CDC belongs to a track centered at a given point in the TrackCenters
         geometry.  This probability peaks at the distance sig_rho, and decays
         with decay width sig_rho_sgma.  The probability is only defined for
-        CyDet wires that are within sig_rho_smear of the signal track distance
-        from the given center.  This means for track center trck_id and CyDet
+        CDC wires that are within sig_rho_smear of the signal track distance
+        from the given center.  This means for track center trck_id and CDC
         wire_id, wires that satisfy
 
         distance(trck_id, wire_id) - sig_rho > sig_rho_smear
@@ -61,7 +61,7 @@ class HoughSpace(object):
         self.trgt_rho = trgt_rho
 
         # Set the geometry of the TrackCenters to cover regions where the signal
-        # track passes through the target and the CyDet volume.  Specifically,
+        # track passes through the target and the CDC volume.  Specifically,
         # enforce that the track's outer most hits may lie in the first or last
         # layer.
         r_max = self.geom.r_by_layer[-1] - self.sig_rho_max
@@ -110,7 +110,7 @@ class HoughSpace(object):
         corsp = lil_matrix((self.geom.n_points, self.track.n_points))
         # Loop over all track centers
         for trck in range(self.track.n_points):
-            # Loop over all wires in CyDet
+            # Loop over all wires in CDC
             for wire in range(self.geom.n_points):
                 # Calculate how far the wire is from the signal track centered
                 # at the current track center
@@ -374,7 +374,7 @@ class HoughShifter(object):
     def _shift_wire_ids(self, wire_shift):
         """
         Shift each wire ID by the amount of wire centres given.  Note that this
-        calls the cydet.shift_wire function, so wires locations themselves are
+        calls the CDC.shift_wire function, so wires locations themselves are
         unchanged, but each wire ID is mapped to a new wire location.
 
         :param wire_shift:  The amount each wire is shifted, where positive

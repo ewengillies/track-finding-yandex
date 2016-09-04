@@ -1,7 +1,7 @@
 import numpy as np
 import scipy
 from root_numpy import root2array
-from cylinder import CyDet, CTH
+from cylinder import CDC, CTH
 """
 Notation used below:
  - wire_id is flat enumerator of all wires
@@ -706,7 +706,7 @@ class GeomHits(FlatHits):
         Returns all hit types, where signal is 1, background is 2,
         nothing is 0.
 
-        :return: numpy.array of shape [CyDet.n_points]
+        :return: numpy.array of shape [CDC.n_points]
         """
         result = np.zeros(self.n_hits, dtype=int)
         # Get the background hits
@@ -721,7 +721,7 @@ class GeomHits(FlatHits):
         """
         Returns energy deposit in all wires
 
-        :return: numpy.array of shape [CyDet.n_points]
+        :return: numpy.array of shape [CDC.n_points]
         """
         energy_deposit = self.get_measurement(events, self.edep_name)
         return energy_deposit
@@ -730,7 +730,7 @@ class GeomHits(FlatHits):
         """
         Returns the timing of the hit
 
-        :return: numpy.array of shape [CyDet.n_points]
+        :return: numpy.array of shape [CDC.n_points]
         """
         time_hit = self.get_measurement(events, self.time_name)
         return time_hit
@@ -739,7 +739,7 @@ class GeomHits(FlatHits):
         """
         Returns the timing of the trigger on an event
 
-        :return: numpy.array of shape [CyDet.n_points]
+        :return: numpy.array of shape [CDC.n_points]
         """
         # Check the trigger time has been set
         assert "CDCHit.fTrigTime" in self.all_branches,\
@@ -757,7 +757,7 @@ class GeomHits(FlatHits):
         return hit_time - trig_time
 
 
-class CyDetHits(GeomHits):
+class CDCHits(GeomHits):
     # pylint: disable=too-many-instance-attributes
     # pylint: disable=bad-continuation
     # pylint: disable=relative-import
@@ -772,7 +772,7 @@ class CyDetHits(GeomHits):
         """
         This generates hit data in a structured array from an input root file
         from a file. It assumes the naming convention "CDCHit.f"+ variable for
-        all leaves. It overlays its data on the uses the CyDet class to define
+        all leaves. It overlays its data on the uses the CDC class to define
         its geometry.
 
         :param path: path to rootfile
@@ -789,7 +789,7 @@ class CyDetHits(GeomHits):
         self.chan_name = prefix + chan_name
         # Build the geom hits object
         GeomHits.__init__(self,
-                          CyDet(),
+                          CDC(),
                           path,
                           tree=tree,
                           prefix=prefix,
@@ -814,7 +814,7 @@ class CyDetHits(GeomHits):
             return self._import_root_file(path, tree,
                                           branches=[self.chan_name])[0]
         else:
-            return super(CyDetHits, self)._get_geom_flat_ids(path, tree)
+            return super(CDCHits, self)._get_geom_flat_ids(path, tree)
 
     def get_measurement(self, name, events=None, shift=None, default=0,
                         only_hits=True, flatten=False, use_sparse=False):
@@ -825,7 +825,7 @@ class CyDetHits(GeomHits):
         NOTE: IF COINCIDENCE HASN'T BEEN DEALT WITH THE FIRST HIT ON THE CHANNEL
         WILL BE TAKEN.  The order is determined by the hits_index
 
-        :return: numpy.array of shape [len(events), CyDet.n_points]
+        :return: numpy.array of shape [len(events), CDC.n_points]
         """
         # Check if events is empty
         if events is None:
@@ -870,7 +870,7 @@ class CyDetHits(GeomHits):
         nothing is 0.  If signal and background are both incident, signal takes
         priority
 
-        :return: numpy.array of shape [CyDet.n_points]
+        :return: numpy.array of shape [CDC.n_points]
         """
         result = np.zeros(self.geom.n_points, dtype=int)
         # Get the background hits
@@ -1129,12 +1129,12 @@ class CTHHits(GeomHits):
             trig_vector[index, trig_vols] = 1
         return trig_vector[:, self.geom.fiducial_crys]
 
-class CDCHits(FlatHits):
+class CyDetHits(FlatHits):
     # pylint: disable=too-many-instance-attributes
     # pylint: disable=bad-continuation
     # pylint: disable=relative-import
     def __init__(self,
-                 cydet_hits,
+                 cdc_hits,
                  cth_hits):
         """
         A class to support overlaying hit classes of the same type.  This will
@@ -1142,15 +1142,15 @@ class CDCHits(FlatHits):
         """
         # TODO assertion here
         self.cth = cth_hits
-        self.cydet = cydet_hits
+        self.cdc = cdc_hits
         self.keep_common_events()
-        self.n_events = min(self.cydet.n_events, self.cth.n_events)
+        self.n_events = min(self.cdc.n_events, self.cth.n_events)
 
     def keep_common_events(self):
         """
         Trim all events by event index so that they have the same events
         """
-        shared_evts = np.intersect1d(self.cydet.get_events()[self.cydet.key_name],
+        shared_evts = np.intersect1d(self.cdc.get_events()[self.cdc.key_name],
                                      self.cth.get_events()[self.cth.key_name])
         self.trim_events(shared_evts)
 
@@ -1161,120 +1161,22 @@ class CDCHits(FlatHits):
         # Print status message
         print "CTH Branches:"
         self.cth.print_branches()
-        print "CyDet Branches:"
-        self.cydet.print_branches()
+        print "CDC Branches:"
+        self.cdc.print_branches()
 
     def trim_events(self, events):
         """
         Keep these events in the data
         """
-        self.cydet.trim_events(events)
+        self.cdc.trim_events(events)
         self.cth.trim_events(events)
-        self.n_events = self.cydet.n_events
+        self.n_events = self.cdc.n_events
 
-    def apply_timing_cut(self, cth_lower=700, cth_upper=110,
-                               cydet_lower=700, cydet_upper=1620):
+    def apply_timing_cut(self, lower=700, upper=1170, drift=450):
         """
         Remove the hits that do not pass timing cut
         """
         self.cth.trim_hits(variable=self.cth.time_name,\
-                           less_than=1100, greater_than=700)
-        self.cydet.trim_hits(variable=self.cydet.time_name,\
-                           less_than=1620, greater_than=700)
-
-    def apply_cth_trigger(self):
-        """
-        Remove events that do not hit the CTH trigger
-        """
-        trigger_events = []
-        for evt in range(self.n_events):
-            sig_hits = self.cth.get_signal_hits(evt)
-            if len(sig_hits) != 0:
-                trigger_events.append(evt)
-        trigger_events = np.array(trigger_events)
-        self.trim_events(trigger_events)
-
-    def apply_n_hits_cut(self, n_hits=30):
-        """
-        Remove events that do not have enough CyDet hits
-        """
-        n_signal_hits = np.array([len(self.cydet.get_signal_hits(evt))
-                                 for evt in range(self.cydet.n_events)])
-        n_signal_hits = np.array(n_signal_hits)
-        good_n_hits = np.where(n_signal_hits >= n_hits)[0]
-        self.trim_events(good_n_hits)
-
-    def apply_max_layer_cut(self, ideal_layer=5):
-        """
-        Remove events that do not have enough CyDet hits
-        """
-        max_layer = []
-        for evt in range(self.n_events):
-            sig_wires = self.cydet.get_sig_wires(evt)
-            these_layers = self.cydet.geom.point_layers[sig_wires]
-            if len(sig_wires) != 0:
-                max_layer.append(np.max(these_layers))
-            else:
-                max_layer.append(-1)
-        max_layer = np.array(max_layer)
-        good_max_layer = np.where(max_layer >= ideal_layer)[0]
-        self.trim_events(good_max_layer)
-
-class HitsMerger(CyDetHits):
-    # pylint: disable=too-many-instance-attributes
-    # pylint: disable=bad-continuation
-    # pylint: disable=relative-import
-    def __init__(self,
-                 sig_class,
-                 path,
-                 tree,
-                 this_class="cydet",
-                 force_time_accept=True):
-        """
-        A class to support overlaying hit classes of the same type.  This will
-        returned the combined event from each of the underlying hit classes.
-
-        """
-        CyDetHits.__init__(self,
-                           path=path,
-                           tree=tree)
-
-
-        # Ensure they are the same type of hits class
-#        assert isinstance(sig_class, bck_class.__class__),\
-#               "The two merged hits must be the same class\n"+\
-#               "First Class : {}\n".format(sig_class)+\
-#               "Second Class : {}\n".format(bck_class)
-#        # Ensure they have the same geometry setup
-#        assert sig_class.geom == bck_class.geom,\
-#               "The two merged hits must have the same geometry"
-        # Remember which one is which
-        self.sig_class = sig_class
-        self.this_class = this_class
-
-        self.summed_properties = [sig_class.edep_name]
-        self.minned_properties = [sig_class.time_name]
-        self.early_properties = [sig_class.hit_type_name]
-
-        # Force signal tracks to be in time acceptance window
-  #      if force_time_accept:
-  #          for evt in range(self.sig_class.n_events):
-  #              sig_time = self.sig_class.get_hit_time(evt)
-  #              self.sig_class.data[self.sig_class.time_name]
-
-    def get_measurement(self, event, name):
-        sig_measure = self.sig_class.get_measurement(event, name)
-        bkg_measure = super(CyDetHits, self).get_measurement(event, name)
-        if self.this_class=="cth":
-            return np.append(bkg_measure, sig_measure)
-        if self.this_class=="cydet":
-            if name in self.summed_properties:
-                return sig_measure + bkg_measure
-            if name in self.minned_properties:
-                return np.amin(sig_measure, bkg_measure)
-            if name in self.early_properties:
-                sig_time = sig_class.get_hit_time(event)
-                bkg_time = super(HitsMerger,self).get_hit_time(event)
-                sig_mask = np.less(sig, bkg)
-                bkg_mask = np.logical_not(mask)
-                return sig_measure[sig_mask] + bkg_measure[bkg_mask]
+                           greater_than=lower, less_than=upper)
+        self.cdc.trim_hits(variable=self.cdc.time_name,\
+                           greater_than=lower, less_than=upper+drift)
