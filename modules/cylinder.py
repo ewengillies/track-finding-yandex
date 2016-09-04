@@ -311,9 +311,19 @@ class CyDet(CylindricalArray):
         cydet_radii = [53.0, 54.6, 56.2, 57.8, 59.4, 61.0, 62.6, 64.2, 65.8,
                        67.4, 69.0, 70.6, 72.2, 73.8, 75.4, 77.0, 78.6, 80.2]
         # Phi0 at end plate
-        cydet_phi0 = [0.015867, 0.015400, 0.000000, 0.014544, 0.00000, 0.000000,
-                      0.013426, 0.000000, 0.012771, 0.00000, 0.012177, 0.000000,
-                      0.011636, 0.000000, 0.00000, 0.000000, 0.010686, 0.000000]
+#        cydet_phi0 = [0.015867, 0.015400, 0.000000, 0.014544, 0.00000, 0.000000,
+#                      0.013426, 0.000000, 0.012771, 0.00000, 0.012177, 0.000000,
+#                     0.011636, 0.000000, 0.00000, 0.000000, 0.010686, 0.000000]
+        # Phi0 in the middle plane
+        cydet_phi0 = [-0.079333, 0.107800,
+                      -0.089760, 0.101810,
+                      -0.084908, 0.082674,
+                      -0.067127, 0.078540,
+                      -0.063853, 0.074800,
+                      -0.060884, 0.071400,
+                      -0.058177, 0.068296,
+                      -0.077983, 0.076358,
+                      -0.064114, 0.073304]
         # Add needed  180 degree shift for wire ID to match with global to local
         # coordinate shift
         cydet_phi0 = [phi_0 + np.pi for phi_0 in cydet_phi0]
@@ -411,6 +421,7 @@ class CTH(CylindricalArray):
         self.down_crys = self.point_lookup[2:4].flatten()
         self.down_cher = self.point_lookup[2]
         self.down_scin = self.point_lookup[3]
+        self.fiducial_crys = self.point_lookup[:4].flatten()
 
     def _get_channel_bits(self, channel):
         """

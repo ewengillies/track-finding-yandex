@@ -1,4 +1,5 @@
 import numpy as np
+import scipy
 from root_numpy import root2array
 from cylinder import CyDet, CTH
 """
@@ -815,8 +816,8 @@ class CyDetHits(GeomHits):
         else:
             return super(CyDetHits, self)._get_geom_flat_ids(path, tree)
 
-    def get_measurement(self, name, events=None, shift=None, default=0, 
-                        only_hits=True, flatten=False):
+    def get_measurement(self, name, events=None, shift=None, default=0,
+                        only_hits=True, flatten=False, use_sparse=False):
         """
         Returns requested measurement in volumes, returning the default value if
         the hit does not register this measurement
@@ -838,9 +839,17 @@ class CyDetHits(GeomHits):
         # Map the evnt_ids to the minimal continous set
         evnt_ids = np.repeat(np.arange(my_events.size),
                              self.event_to_n_hits[my_events])
-        # Add the measurement to the correct cells in the result
-        result = default*np.ones((my_events.size, self.geom.n_points),
-                                  dtype=float)
+        # Try to use sparese if we want to
+        if use_sparse:
+            assert default == 0, "Error, default measurement"+\
+                                 "set to {}\n".format(default)+\
+                                 "with use_sparse = True.  Unsupported!"
+            result = scipy.sparse.lil_matrix((my_events.size,
+                                              self.geom.n_points),
+                                              dtype=float)
+        else:
+            result = default*np.ones((my_events.size, self.geom.n_points),
+                                      dtype=float)
         result[evnt_ids, wire_ids] = meas
         if shift is not None:
             result = result[:, self.geom.shift_wires(shift)]
@@ -851,6 +860,8 @@ class CyDetHits(GeomHits):
             result = result[evnt_ids, wire_ids]
         if flatten:
             result = result.flatten()
+        if use_sparse:
+            return result.tocsr()
         return result
 
     def get_hit_types(self, events, unique=True):
@@ -898,6 +909,29 @@ class CyDetHits(GeomHits):
         odd_hit_vector = np.zeros(self.geom.n_points)
         odd_hit_vector[odd_wires] = 1
         return even_hit_vector, odd_hit_vector
+
+    def min_layer_cut(self, min_layer):
+        """
+        Returns the EventNumbers of the events that pass the min_layer criterium
+        """
+        # Filter for max layer
+        evt_max = np.zeros(self.n_events)
+        for event in range(self.n_events):
+            evt_hits = self.get_measurement(self.flat_name,
+                                            events=event,
+                                            flatten=False,
+                                            only_hits=False).astype(int)
+            evt_max[event] = np.amax(self.geom.point_layers[evt_hits])
+        good_event_idx = np.where(evt_max >= min_layer)
+        return np.unique(self.get_events(events=good_event_idx)[self.key_name])
+
+    def min_hits_cut(self, min_hits):
+        """
+        Returns the EventNumbers of the events that pass the min_hits criterium
+        """
+        # Filter for number of signal hits
+        good_events = np.where(self.event_to_n_hits >= min_hits)[0]
+        return np.unique(self.get_events(events=good_events)[self.key_name])
 
 ### DEPRECIATED METHODS INCLUDED FOR BACKWARDS COMPATIBILITY ###
 
@@ -994,11 +1028,9 @@ class CTHHits(GeomHits):
         flat_id_column = flat_ids.astype(int)
         return flat_id_column
 
-    def get_events(self, events=None, unique=True, hodoscope="both"):
+    def get_events(self, events=None, hodoscope="both"):
         """
         Returns the hits from the given event(s).  Default gets all events
-
-        :param unique: Force each event to only be retrieved once
         """
         assert hodoscope.startswith("both") or\
                hodoscope.startswith("up") or\
@@ -1012,6 +1044,90 @@ class CTHHits(GeomHits):
         elif hodoscope.startswith("down"):
             events = self.filter_hits(events, self.flat_name, greater_than=127)
         return events
+
+    def _find_trigger_signal(self, vol_types):
+        """
+        Returns the volumes that take part in the trigger pattern given an array
+        of volume types
+
+        :param vol_types: np.array of shape [self.geom.n_points] whose value is
+                          non-zero for a volume hit
+        :return trig_vols: np.array of shape [self.geom.n_points] whose value is
+                           1 for all volumes that form a trigger shape
+        """
+        # Get all volumes with pairs
+        hit_and_left = np.logical_and(vol_types,
+                                      vol_types[self.geom.shift_wires(1)])
+        hit_and_right = np.logical_and(vol_types,
+                                       vol_types[self.geom.shift_wires(-1)])
+        trig_crys = np.logical_or(hit_and_left, hit_and_right)
+        # Get volumes with crystals hit above or below
+        on_top = np.logical_and(trig_crys[self.geom.cher_crys],
+                                trig_crys[self.geom.scin_crys])
+        trig_crys[self.geom.cher_crys] = on_top
+        trig_crys[self.geom.scin_crys] = on_top
+        # Include the crystals to the left and right of these volumes
+        trig_crys = np.logical_or.reduce((trig_crys,
+                                          trig_crys[self.geom.shift_wires(1)],
+                                          trig_crys[self.geom.shift_wires(-1)]))
+        # Return the volumes that pass and have hits
+        return np.logical_and(vol_types, trig_crys)
+
+
+    def set_trigger_time(self):
+        # Sort by time first
+        self.sort_hits(self.time_name)
+        # Reset the trigger timing
+        self.data[self.trig_name] = 0
+        for event in range(self.n_events):
+            # Get the volumes with hits for these events
+            vol_types = self.get_vol_types(event)
+            trig_vols = np.nonzero(self._find_trigger_signal(vol_types))[0]
+            # Skip the event if there is no trigger
+            if len(trig_vols) == 0:
+                continue
+            # Find the hit indexes of all the volumes that have hits
+            trig_hits = self.filter_hits(self.get_events(event),
+                                         self.flat_name,
+                                         values=trig_vols)[self.hits_index_name]
+            # Get the indexes where these volumes first appear in the
+            # (event,time) sorted data
+            _, uniq_idxs = np.unique(self.data[self.flat_name][trig_hits],
+                                     return_index=True)
+            # Get as close to the fourth hit as possible, but not less
+            uniq_idxs = uniq_idxs[uniq_idxs > 2]
+            fourth_uniq_hit = uniq_idxs[(np.abs(uniq_idxs-3)).argmin()]
+            fourth_vol_hit = trig_hits[fourth_uniq_hit]
+            self.data[self.trig_name][trig_hits] = \
+                    self.data[self.time_name][fourth_vol_hit]
+
+# TODO move these into get measurement
+
+    def get_trig_hits(self, events=None):
+        """
+        Return the trigger hit hit_index in the given event
+        """
+        # Find the hit indexes of all the volumes that have hits
+        return self.filter_hits(self.get_events(events),
+                                self.trig_name,
+                                values=0,
+                                invert=True)[self.hits_index_name]
+
+    def get_trig_vector(self, events):
+        """
+        Return the shape [events, self.geom.n_points], where 1 is a triggered
+        volume
+        """
+        # Allow for a single event
+        if isinstance(events, int):
+            events = [events]
+        # Find the hit indexes of all the volumes that have hits
+        trig_vector = np.zeros((len(events), self.geom.n_points))
+        for index, evt in enumerate(events):
+            trig_vols = self.data[self.flat_name][self.get_trig_hits(evt)]
+            trig_vols = np.unique(trig_vols)
+            trig_vector[index, trig_vols] = 1
+        return trig_vector[:, self.geom.fiducial_crys]
 
 class CDCHits(FlatHits):
     # pylint: disable=too-many-instance-attributes
