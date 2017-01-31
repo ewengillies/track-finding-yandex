@@ -392,6 +392,8 @@ class FlatHits(object):
         # Otherwise assume it is a list of events.
         else:
             # Ensure we only get each event once
+            # TODO remove and check that this is fine.  Sorts the event ids 
+            # before returning them.  This is bad
             if unique:
                 events = np.unique(events)
             # Get all the hits we want as flat
@@ -848,8 +850,10 @@ class CDCHits(GeomHits):
         # Check if events is empty
         if events is None:
             events = np.arange(self.n_events)
+        if isinstance(events, int):
+            events = [events]
         # Get the events as an array
-        my_events = np.array(events)
+        my_events = np.sort(np.array(events))
         # Select the relevant event from data
         meas = self.get_events(my_events)[name]
         # Get the wire_ids and event_ids of the hit data
