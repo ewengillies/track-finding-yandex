@@ -10,7 +10,7 @@ Notation used below:
  - point_index is the index of point in the layer
 """
 
-class CylindricalArray(object):
+class CylindricalArray2(object):
     # pylint: disable=too-many-instance-attributes
     # pylint: disable=bad-continuation
     def __eq__(self, other):
@@ -19,95 +19,109 @@ class CylindricalArray(object):
     def __ne__(self, other):
         return not self.__eq__(other)
 
-    def __init__(self, n_by_layer, r_by_layer, phi0_by_layer):
+   
+    def __init__(self, wire_x, wire_y, layerID):
         """
-        This defines a cylindrical array of points from a layers.  It returns a
-        flat enumerator of the points in the array, as well as pairwise
-        distances between all points, and the neighbours of each point.  It also
-        stores the position in both cartesian and polar coordinates of each
-        point.
+        This defines a cylindrical array of points read in from positional
+        information, including IDs.
 
-        :param n_by_layer: list of number of points by layer, sorted by radii of
-                           corresponding layer
-        :param r_by_layer: list of radii of each layer, sorted by radii
-        :param phi0_by_layer: angular displacement of the first point of each
-                              layer
+        It returns a flat enumerator of the points in the array, as well as
+        pairwise distances between all points, and the neighbours of each point.
+        It also stores the position in both cartesian and polar coordinates of
+        each point.
+        
+        :param :
 
         """
-        self.n_by_layer = np.array(n_by_layer)
+        self.point_x = wire_x
+        self.point_y = wire_y
+        self.point_layers = layerID
+        _, self.n_by_layer = np.unique(layerID, return_counts=True)
+        self.first_point = self._get_first_point(self.n_by_layer)
         self.n_points = sum(self.n_by_layer)
-
-        self.first_point = self._get_first_point()
-        self.dphi_by_layer = self._prepare_dphi_by_layer()
-        self.point_lookup = self._prepare_points_lookup()
-        self.point_rhos = self._prepare_point_rho(r_by_layer)
+        self.point_lookup = self._prepare_points_lookup(self.n_by_layer)
         self.point_layers = np.repeat(np.arange(self.n_by_layer.size),
                                           self.n_by_layer)
-        self.point_indexes = np.arange(self.n_points) - \
-                             self.first_point[self.point_layers]
-        self.point_phis = self._prepare_point_phi(phi0_by_layer)
-        self.point_x, self.point_y = self._prepare_point_cartesian()
+        self.point_indexes = np.arange(self.n_points) -                              self.first_point[self.point_layers]
+        self.dphi_by_layer = self._prepare_dphi_by_layer(self.n_by_layer)
+        
+        self.point_rhos = np.sqrt(np.square(wire_x)+np.square(wire_y))
+        self.point_phis = np.arctan2(wire_y,wire_x)
+        
         self.point_pol = self._prepare_polarity()
         self.point_dists = self._prepare_point_distances()
-        self.point_neighbours, self.lr_neighbours = \
-            self._prepare_point_neighbours(phi0_by_layer)
+        self.point_neighbours, self.lr_neighbours =             self._prepare_point_neighbours(self.point_phis[self.first_point])
+    
+    def OldConstructor(self, in_n_by_layer, in_r_by_layer, in_phi0_by_layer):
+        n_by_layer = np.array(in_n_by_layer)
+        r_by_layer = np.array(in_r_by_layer)
+        phi0_by_layer = np.array(in_phi0_by_layer)
+        n_points = sum(n_by_layer)
+        first_point = self._get_first_point(n_by_layer)
+        dphi_by_layer = self._prepare_dphi_by_layer(n_by_layer)
+        point_rhos = self._prepare_point_rho(first_point, n_points,
+                                             n_by_layer, r_by_layer)
+        point_layers = np.repeat(np.arange(n_by_layer.size),n_by_layer)
+        point_phis = self._prepare_point_phi(n_points, first_point, 
+                                             n_by_layer,  phi0_by_layer, 
+                                             dphi_by_layer)
+        point_x, point_y = self._prepare_point_cartesian(point_rhos, point_phis)
+        return point_x, point_y, point_layers
 
-    def _get_first_point(self):
+    def _get_first_point(self, n_by_layer):
         """
         Returns the point_id of the first point in each layer
 
         :return: numpy array of first point in each layer
         """
-        first_point = np.zeros(len(self.n_by_layer), dtype=int)
-        for i in range(len(self.n_by_layer)):
-            first_point[i] = sum(self.n_by_layer[:i])
+        first_point = np.zeros(len(n_by_layer), dtype=int)
+        for i in range(len(n_by_layer)):
+            first_point[i] = sum(n_by_layer[:i])
         return first_point
 
-    def _prepare_points_lookup(self):
+    def _prepare_points_lookup(self, n_by_layer):
         """
         Prepares lookup table to map from [layer_id, point_index] -> point_id
 
         :return:
         """
-        lookup = np.zeros([len(self.n_by_layer),
-                           max(self.n_by_layer)], dtype='int')
+        lookup = np.zeros([len(n_by_layer),
+                           max(n_by_layer)], dtype='int')
         lookup[:, :] = - 1
         point_id = 0
-        for layer_id, layer_size in enumerate(self.n_by_layer):
+        for layer_id, layer_size in enumerate(n_by_layer):
             for cell_id in range(layer_size):
                 lookup[layer_id, cell_id] = point_id
                 point_id += 1
-        assert point_id == sum(self.n_by_layer)
+        assert point_id == sum(n_by_layer)
         return lookup
 
-    def _prepare_point_rho(self, r_by_layer):
+    def _prepare_point_rho(self, point_0, n_points, n_by_layer, r_by_layer):
         """
         Prepares lookup table to map from point_id to the radial position
 
         :return: numpy.array of shape [n_points]
         """
-        point_0 = self.first_point
-        radii = np.zeros(self.n_points, dtype=float)
-        for lay, size in enumerate(self.n_by_layer):
+        radii = np.zeros(n_points, dtype=float)
+        for lay, size in enumerate(n_by_layer):
             radii[point_0[lay]:point_0[lay] + size] = r_by_layer[lay]
         return radii
 
-    def _prepare_point_phi(self, phi0_by_layer):
+    def _prepare_point_phi(self, n_points, point_0, n_by_layer, phi0_by_layer, dphi_by_layer):
         """
         Prepares lookup table to map from point_id to the angular position
 
         :return: numpy.array of shape [n_points]
         """
-        angles = np.zeros(self.n_points, dtype=float)
-        point_0 = self.first_point
-        for lay, layer_size in enumerate(self.n_by_layer):
+        angles = np.zeros(n_points, dtype=float)
+        for lay, layer_size in enumerate(n_by_layer):
             for point in range(layer_size):
                 angles[point_0[lay] + point] = (phi0_by_layer[lay]
-                                              + self.dphi_by_layer[lay]*point)
+                                              + dphi_by_layer[lay]*point)
         angles %= 2 * math.pi
         return angles
 
-    def _prepare_point_cartesian(self):
+    def _prepare_point_cartesian(self, point_rhos, point_phis):
         """
         Returns the positions of each point in cartesian system
 
@@ -115,8 +129,8 @@ class CylindricalArray(object):
          - first one contains x coordinates
          - second one contains y coordinates
         """
-        x_coor = self.point_rhos * np.cos(self.point_phis)
-        y_coor = self.point_rhos * np.sin(self.point_phis)
+        x_coor = point_rhos * np.cos(point_phis)
+        y_coor = point_rhos * np.sin(point_phis)
         return x_coor, y_coor
 
     def _prepare_point_distances(self):
@@ -194,12 +208,12 @@ class CylindricalArray(object):
                     neigh[point, prv_a_point] = 1  # Above/Below Anti-Clockwise
         return neigh.tocsr(), lr_neigh.tocsr()
 
-    def _prepare_dphi_by_layer(self):
+    def _prepare_dphi_by_layer(self, n_by_layer):
         """
         Returns the phi separation of the points as defined by the number of
         points in the layer
         """
-        return 2 * math.pi / np.asarray(self.n_by_layer)
+        return 2 * math.pi / np.asarray(n_by_layer)
 
     def _prepare_polarity(self):
         """
@@ -298,7 +312,7 @@ class CylindricalArray(object):
         return new_point
 
 
-class CDC(CylindricalArray):
+class CDC2(CylindricalArray2):
     def __init__(self, projection=0.5):
         """
         Defines the Cylindrical Detector Geometry
@@ -346,7 +360,10 @@ class CDC(CylindricalArray):
         new_dphi = dphi_from_phi0 + cdc_phi0
 
         # Build the cylindrical array
-        CylindricalArray.__init__(self, cdc_wires, new_radius, new_dphi)
+        point_x, point_y, layer_id = self.OldConstructor(cdc_wires, new_radius, new_dphi)
+        #CylindricalArray.__init__(self, cdc_wires, new_radius, new_dphi)
+        # Build the cylindrical array
+        CylindricalArray2.__init__(self, point_x, point_y, layer_id)
 
     def theta_at_rel_z(self, z_dist, total_z=1.0):
         """
@@ -386,13 +403,10 @@ class CDC(CylindricalArray):
         Note the angular displacment subtended must be less than the total
         angular displacement by definition.
         """
-        assert not np.any(np.abs(this_theta) > np.abs(self.phi_shft)),\
-            "The input angle is larger than the absoulte angular difference\n"+\
-            "Abs. Diff. {} \n".format(self.phi_shft)+\
-            "Reqs. Ang. {} \n".format(this_theta)
+        assert not np.any(np.abs(this_theta) > np.abs(self.phi_shft)),            "The input angle is larger than the absoulte angular difference\n"+            "Abs. Diff. {} \n".format(self.phi_shft)+            "Reqs. Ang. {} \n".format(this_theta)
         return abs(radius*np.cos(self.phi_shft/2.)/np.cos(self.phi_shft/2. - this_theta))
 
-class CTH(CylindricalArray):
+class CTH2(CylindricalArray2):
     # pylint: disable=too-many-instance-attributes
     def __init__(self, left_handed=True):
         """
@@ -411,7 +425,8 @@ class CTH(CylindricalArray):
                     (-180 + 360/(2.*self.n_crystals)) * np.pi/180.,
                     (-180 + 360/(2.*self.n_crystals)) * np.pi/180.,
                     0]
-        CylindricalArray.__init__(self, cth_n_vols, cth_radii, cth_phi0)
+        point_x, point_y, layer_id = self.OldConstructor(cth_n_vols, cth_radii, cth_phi0) 
+        CylindricalArray2.__init__(self, point_x, point_y, layer_id)
 
         # Get drawing parameters
         ## WIDTH HEIGHT DEFLECTION_ANGLE
@@ -480,7 +495,7 @@ class CTH(CylindricalArray):
         return bool(trimmed_channel & is_upstream)
 
 
-    def _prepare_dphi_by_layer(self):
+    def _prepare_dphi_by_layer(self, n_by_layer):
         """
         Returns the phi separation of the points as defined by the number of
         points in the layer
@@ -488,11 +503,11 @@ class CTH(CylindricalArray):
         if self.left_handed:
             # Downstream is left handed, upstream is right handed
             handedness = np.asarray([-1, -1, 1, 1, 1])
-            return 2 * math.pi / (np.asarray(self.n_by_layer) * handedness)
+            return 2 * math.pi / (np.asarray(n_by_layer) * handedness)
         else:
-            return 2 * math.pi / np.asarray(self.n_by_layer)
+            return 2 * math.pi / np.asarray(n_by_layer)
 
-class TrackCenters(CylindricalArray):
+class TrackCenters2(CylindricalArray2):
     def __init__(self, r_min=10., r_max=50., rho_bins=10, arc_bins=0):
         """
         Defines the geometry of the centers of the potential tracks used in the
@@ -521,5 +536,5 @@ class TrackCenters(CylindricalArray):
         n_track_cent = [int(round(2 * math.pi * r_track_cent[n] / arc_res))
                         for n in range(rho_bins)]
         phi0_track_cent = [0] * rho_bins
-        CylindricalArray.__init__(self, n_track_cent, r_track_cent, \
-                phi0_track_cent)
+        point_x, point_y, layer_id = self.OldConstructor(n_track_cent, r_track_cent, phi0_track_cent)
+        CylindricalArray2.__init__(self, point_x, point_y, layer_id)
