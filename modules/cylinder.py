@@ -10,7 +10,7 @@ Notation used below:
  - point_index is the index of point in the layer
 """
 
-class CylindricalArray2(object):
+class CylindricalArray(object):
     # pylint: disable=too-many-instance-attributes
     # pylint: disable=bad-continuation
     def __eq__(self, other):
@@ -19,7 +19,7 @@ class CylindricalArray2(object):
     def __ne__(self, other):
         return not self.__eq__(other)
 
-   
+
     def __init__(self, wire_x, wire_y, layerID):
         """
         This defines a cylindrical array of points read in from positional
@@ -29,7 +29,7 @@ class CylindricalArray2(object):
         pairwise distances between all points, and the neighbours of each point.
         It also stores the position in both cartesian and polar coordinates of
         each point.
-        
+
         :param :
 
         """
@@ -42,17 +42,19 @@ class CylindricalArray2(object):
         self.point_lookup = self._prepare_points_lookup(self.n_by_layer)
         self.point_layers = np.repeat(np.arange(self.n_by_layer.size),
                                           self.n_by_layer)
-        self.point_indexes = np.arange(self.n_points) -                              self.first_point[self.point_layers]
+        self.point_indexes = np.arange(self.n_points) -\
+                self.first_point[self.point_layers]
         self.dphi_by_layer = self._prepare_dphi_by_layer(self.n_by_layer)
-        
+
         self.point_rhos = np.sqrt(np.square(wire_x)+np.square(wire_y))
-        self.point_phis = np.arctan2(wire_y,wire_x)
-        
+        self.point_phis = np.arctan2(wire_y, wire_x)
+
         self.point_pol = self._prepare_polarity()
         self.point_dists = self._prepare_point_distances()
-        self.point_neighbours, self.lr_neighbours =             self._prepare_point_neighbours(self.point_phis[self.first_point])
-    
-    def OldConstructor(self, in_n_by_layer, in_r_by_layer, in_phi0_by_layer):
+        self.point_neighbours, self.lr_neighbours = \
+            self._prepare_point_neighbours(self.point_phis[self.first_point])
+
+    def _old_constructor(self, in_n_by_layer, in_r_by_layer, in_phi0_by_layer):
         n_by_layer = np.array(in_n_by_layer)
         r_by_layer = np.array(in_r_by_layer)
         phi0_by_layer = np.array(in_phi0_by_layer)
@@ -61,9 +63,9 @@ class CylindricalArray2(object):
         dphi_by_layer = self._prepare_dphi_by_layer(n_by_layer)
         point_rhos = self._prepare_point_rho(first_point, n_points,
                                              n_by_layer, r_by_layer)
-        point_layers = np.repeat(np.arange(n_by_layer.size),n_by_layer)
-        point_phis = self._prepare_point_phi(n_points, first_point, 
-                                             n_by_layer,  phi0_by_layer, 
+        point_layers = np.repeat(np.arange(n_by_layer.size), n_by_layer)
+        point_phis = self._prepare_point_phi(n_points, first_point,
+                                             n_by_layer, phi0_by_layer,
                                              dphi_by_layer)
         point_x, point_y = self._prepare_point_cartesian(point_rhos, point_phis)
         return point_x, point_y, point_layers
@@ -107,7 +109,8 @@ class CylindricalArray2(object):
             radii[point_0[lay]:point_0[lay] + size] = r_by_layer[lay]
         return radii
 
-    def _prepare_point_phi(self, n_points, point_0, n_by_layer, phi0_by_layer, dphi_by_layer):
+    def _prepare_point_phi(self, n_points, point_0, n_by_layer,
+                                 phi0_by_layer, dphi_by_layer):
         """
         Prepares lookup table to map from point_id to the angular position
 
@@ -312,7 +315,7 @@ class CylindricalArray2(object):
         return new_point
 
 
-class CDC2(CylindricalArray2):
+class CDC(CylindricalArray):
     def __init__(self, projection=0.5):
         """
         Defines the Cylindrical Detector Geometry
@@ -360,10 +363,12 @@ class CDC2(CylindricalArray2):
         new_dphi = dphi_from_phi0 + cdc_phi0
 
         # Build the cylindrical array
-        point_x, point_y, layer_id = self.OldConstructor(cdc_wires, new_radius, new_dphi)
+        point_x, point_y, layer_id = self._old_constructor(cdc_wires,
+                                                           new_radius,
+                                                           new_dphi)
         #CylindricalArray.__init__(self, cdc_wires, new_radius, new_dphi)
         # Build the cylindrical array
-        CylindricalArray2.__init__(self, point_x, point_y, layer_id)
+        CylindricalArray.__init__(self, point_x, point_y, layer_id)
 
     def theta_at_rel_z(self, z_dist, total_z=1.0):
         """
@@ -403,10 +408,14 @@ class CDC2(CylindricalArray2):
         Note the angular displacment subtended must be less than the total
         angular displacement by definition.
         """
-        assert not np.any(np.abs(this_theta) > np.abs(self.phi_shft)),            "The input angle is larger than the absoulte angular difference\n"+            "Abs. Diff. {} \n".format(self.phi_shft)+            "Reqs. Ang. {} \n".format(this_theta)
-        return abs(radius*np.cos(self.phi_shft/2.)/np.cos(self.phi_shft/2. - this_theta))
+        assert not np.any(np.abs(this_theta) > np.abs(self.phi_shft)),\
+            "The input angle is larger than the absoulte angular difference\n"+\
+            "Abs. Diff. {} \n".format(self.phi_shft)+\
+            "Reqs. Ang. {} \n".format(this_theta)
+        return abs(radius*np.cos(self.phi_shft/2.)/\
+                          np.cos(self.phi_shft/2. - this_theta))
 
-class CTH2(CylindricalArray2):
+class CTH(CylindricalArray):
     # pylint: disable=too-many-instance-attributes
     def __init__(self, left_handed=True):
         """
@@ -425,8 +434,10 @@ class CTH2(CylindricalArray2):
                     (-180 + 360/(2.*self.n_crystals)) * np.pi/180.,
                     (-180 + 360/(2.*self.n_crystals)) * np.pi/180.,
                     0]
-        point_x, point_y, layer_id = self.OldConstructor(cth_n_vols, cth_radii, cth_phi0) 
-        CylindricalArray2.__init__(self, point_x, point_y, layer_id)
+        point_x, point_y, layer_id = self._old_constructor(cth_n_vols,
+                                                           cth_radii,
+                                                           cth_phi0)
+        CylindricalArray.__init__(self, point_x, point_y, layer_id)
 
         # Get drawing parameters
         ## WIDTH HEIGHT DEFLECTION_ANGLE
@@ -507,7 +518,7 @@ class CTH2(CylindricalArray2):
         else:
             return 2 * math.pi / np.asarray(n_by_layer)
 
-class TrackCenters2(CylindricalArray2):
+class TrackCenters(CylindricalArray):
     def __init__(self, r_min=10., r_max=50., rho_bins=10, arc_bins=0):
         """
         Defines the geometry of the centers of the potential tracks used in the
@@ -536,5 +547,7 @@ class TrackCenters2(CylindricalArray2):
         n_track_cent = [int(round(2 * math.pi * r_track_cent[n] / arc_res))
                         for n in range(rho_bins)]
         phi0_track_cent = [0] * rho_bins
-        point_x, point_y, layer_id = self.OldConstructor(n_track_cent, r_track_cent, phi0_track_cent)
-        CylindricalArray2.__init__(self, point_x, point_y, layer_id)
+        point_x, point_y, layer_id = self._old_constructor(n_track_cent,
+                                                           r_track_cent,
+                                                           phi0_track_cent)
+        CylindricalArray.__init__(self, point_x, point_y, layer_id)
