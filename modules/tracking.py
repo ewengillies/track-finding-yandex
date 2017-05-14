@@ -64,10 +64,11 @@ class HoughSpace(object):
         # track passes through the target and the CDC volume.  Specifically,
         # enforce that the track's outer most hits may lie in the first or last
         # layer.
-        r_max = self.geom.r_by_layer[-1] - self.sig_rho_max
+        r_max = np.amax(self.geom.point_rhos) - self.sig_rho_max
         r_min = max(self.sig_rho_max - self.trgt_rho,
-                    self.geom.r_by_layer[0] - self.sig_rho_max)
-        self.track = TrackCenters(arc_bins=arc_bins, rho_bins=rho_bins, r_min=r_min, r_max=r_max)
+                    np.amin(self.geom.point_rhos) - self.sig_rho_max)
+        self.track = TrackCenters(arc_bins=arc_bins, rho_bins=rho_bins, 
+                                  r_min=r_min, r_max=r_max)
 
         self.track_wire_dists = self._prepare_track_distances()
         self.correspondence = self._prepare_wire_track_corresp()

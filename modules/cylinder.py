@@ -18,6 +18,7 @@ class CylindricalArray(object):
             and self.__dict__ == other.__dict__)
     def __ne__(self, other):
         return not self.__eq__(other)
+
     def __init__(self, n_by_layer, r_by_layer, phi0_by_layer):
         """
         This defines a cylindrical array of points from a layers.  It returns a
@@ -34,24 +35,22 @@ class CylindricalArray(object):
 
         """
         self.n_by_layer = np.array(n_by_layer)
-        self.r_by_layer = r_by_layer
-        self.phi0_by_layer = phi0_by_layer
         self.n_points = sum(self.n_by_layer)
 
         self.first_point = self._get_first_point()
         self.dphi_by_layer = self._prepare_dphi_by_layer()
         self.point_lookup = self._prepare_points_lookup()
-        self.point_rhos = self._prepare_point_rho()
+        self.point_rhos = self._prepare_point_rho(r_by_layer)
         self.point_layers = np.repeat(np.arange(self.n_by_layer.size),
                                           self.n_by_layer)
         self.point_indexes = np.arange(self.n_points) - \
                              self.first_point[self.point_layers]
-        self.point_phis = self._prepare_point_phi()
+        self.point_phis = self._prepare_point_phi(phi0_by_layer)
         self.point_x, self.point_y = self._prepare_point_cartesian()
         self.point_pol = self._prepare_polarity()
         self.point_dists = self._prepare_point_distances()
         self.point_neighbours, self.lr_neighbours = \
-            self._prepare_point_neighbours()
+            self._prepare_point_neighbours(phi0_by_layer)
 
     def _get_first_point(self):
         """
@@ -81,7 +80,7 @@ class CylindricalArray(object):
         assert point_id == sum(self.n_by_layer)
         return lookup
 
-    def _prepare_point_rho(self):
+    def _prepare_point_rho(self, r_by_layer):
         """
         Prepares lookup table to map from point_id to the radial position
 
@@ -90,10 +89,10 @@ class CylindricalArray(object):
         point_0 = self.first_point
         radii = np.zeros(self.n_points, dtype=float)
         for lay, size in enumerate(self.n_by_layer):
-            radii[point_0[lay]:point_0[lay] + size] = self.r_by_layer[lay]
+            radii[point_0[lay]:point_0[lay] + size] = r_by_layer[lay]
         return radii
 
-    def _prepare_point_phi(self):
+    def _prepare_point_phi(self, phi0_by_layer):
         """
         Prepares lookup table to map from point_id to the angular position
 
@@ -103,7 +102,7 @@ class CylindricalArray(object):
         point_0 = self.first_point
         for lay, layer_size in enumerate(self.n_by_layer):
             for point in range(layer_size):
-                angles[point_0[lay] + point] = (self.phi0_by_layer[lay]
+                angles[point_0[lay] + point] = (phi0_by_layer[lay]
                                               + self.dphi_by_layer[lay]*point)
         angles %= 2 * math.pi
         return angles
@@ -130,7 +129,7 @@ class CylindricalArray(object):
         distances = pdist(point_xy)
         return squareform(distances)
 
-    def _prepare_point_neighbours(self):
+    def _prepare_point_neighbours(self, phi0_by_layer):
         """
         Returns a sparse array of neighbour relations, where slicing should be
         done in the row index, i.e. find(neighbours[point_0,:]) will return the
@@ -175,7 +174,7 @@ class CylindricalArray(object):
                     # Find point in adjacent layer closest in phi to
                     # current point
                     # Account for phi0
-                    a_point = rel_pos - (self.phi0_by_layer[a_lay]/(2*math.pi))
+                    a_point = rel_pos - (phi0_by_layer[a_lay]/(2*math.pi))
                     # Find index of adjacent layer point
                     a_point *= a_n_points
                     a_point = round(a_point)
