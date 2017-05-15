@@ -1,4 +1,5 @@
 import numpy as np
+from root_numpy import root2array
 import math
 from scipy.sparse import lil_matrix, find
 from scipy.spatial.distance import pdist, squareform
@@ -370,6 +371,9 @@ class CDC(CylindricalArray):
         # Build the cylindrical array
         CylindricalArray.__init__(self, point_x, point_y, layer_id)
 
+        # Give it a recbe wiring
+        self.recbe = RECBE(self)
+
     def theta_at_rel_z(self, z_dist, total_z=1.0):
         """
         Get the angular displacement of the wires in each layer as a function of
@@ -551,3 +555,42 @@ class TrackCenters(CylindricalArray):
                                                            r_track_cent,
                                                            phi0_track_cent)
         CylindricalArray.__init__(self, point_x, point_y, layer_id)
+
+class RECBE(CylindricalArray):
+    def __init__(self, cdc, file_name=None):
+        # Default file name
+        recbe_file = "/home/elg112/development/ICEDUST/"+\
+                     "track_finding_standalone/"+\
+                     "track_finding_yandex/data/chanmap_20160814.root"
+        # Set file name
+        if not file_name is None:
+            recbe_file = file_name
+        # Get the sense wires
+        selection = "isSenseWire == 1 && LayerID > 0 && LayerID < 19"
+        recbe_arr = root2array(recbe_file, selection=selection,
+                               branches=["LayerID", "CellID", "BoardID",
+                                         "BrdLayID", "BrdLocID", "ChanID"])
+        recbe_arr["LayerID"] = recbe_arr["LayerID"] - 1
+        # Get the board mapping
+        self.wire_to_board = recbe_arr["BoardID"][cdc.point_lookup[\
+                                                    recbe_arr["LayerID"],
+                                                    recbe_arr["CellID"]]]
+        brds = np.unique(self.wire_to_board)
+        self.board_to_wires = \
+            np.array([np.where(self.wire_to_board == val)[0] for val in brds])
+
+        # Get the positions of the board
+        board_x = np.array([np.average(cdc.point_x[self.board_to_wires[brd]])\
+                                                           for brd in brds])
+        board_y = np.array([np.average(cdc.point_y[self.board_to_wires[brd]])\
+                                                           for brd in brds])
+
+        # Get the board layers by board ID
+        all_ids = np.unique(recbe_arr["BoardID"])
+        board_lay = np.zeros(len(all_ids))
+        for brd in all_ids:
+            brd_id_wires = np.where(recbe_arr["BoardID"] == brd)
+            board_lay[brd] = np.unique(recbe_arr["BrdLayID"][brd_id_wires])[0]
+
+        # Construct the array
+        CylindricalArray.__init__(self, board_x, board_y, board_lay)

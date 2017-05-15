@@ -20,7 +20,7 @@ class HoughSpace(object):
     # pylint: disable=no-name-in-module
     def __init__(self, geom, sig_rho=33.6, sig_rho_max=35.,
                  sig_rho_min=24, sig_rho_sgma=3., trgt_rho=20., rho_bins=20,
-                 arc_bins=20):
+                 arc_bins=20, split=True):
         """
         This class represents a Hough transform method. It initiates from a data
         file, and over lays a track center geometry on this.  It also defines a
@@ -71,7 +71,7 @@ class HoughSpace(object):
                                   r_min=r_min, r_max=r_max)
 
         self.track_wire_dists = self._prepare_track_distances()
-        self.correspondence = self._prepare_wire_track_corresp()
+        self.correspondence = self._prepare_wire_track_corresp(split)
         self.norm_track_neighs = self._prepare_track_nns()
 
     def _prepare_track_distances(self):
@@ -100,7 +100,7 @@ class HoughSpace(object):
         if distance >= 0:
             return 1.05 - distance/(self.sig_rho_max - self.sig_rho + 0.1)
 
-    def _prepare_wire_track_corresp(self):
+    def _prepare_wire_track_corresp(self, split=True):
         """
         Defines the probability that a given wire belongs to a track centered at
         a given track center bin.  Produces two appended sparce matricies, one
@@ -120,6 +120,8 @@ class HoughSpace(object):
                 if (this_dist <= self.sig_rho_max) and  \
                    (this_dist >= self.sig_rho_min):
                     corsp[wire, trck] = self.dist_prob(this_dist)
+        if not split:
+            return corsp
         # Define even and odd layer wires
         even_wires = self.geom.point_pol != 1
         odd_wires = self.geom.point_pol == 1
