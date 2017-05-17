@@ -450,7 +450,7 @@ class HoughShifter(object):
                              units of dphi
         """
         # Find the ideal shift in phi to align images in hough space
-        diff = sys.maxint
+        diff = sys.maxsize
         # Try shifting the integrated contributions by each of the allowed dphis
         for phi_shift in range(self.lower_lim, self.upper_lim+1):
             # Shift the integral of contributions over by a given dphi

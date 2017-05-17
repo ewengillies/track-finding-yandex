@@ -284,7 +284,7 @@ class FlatHits(object):
         try:
             hits_to_events = np.zeros(sum(self.event_to_n_hits))
         except ValueError:
-            print type(self.event_to_n_hits)
+            print(type(self.event_to_n_hits))
         event_to_hits = []
         for event, n_hits in enumerate(self.event_to_n_hits):
             # Record the last hit in the event
@@ -516,8 +516,8 @@ class FlatHits(object):
         Print the names of the data available once you are done
         """
         # Print status message
-        print "Branches available are:"
-        print "\n".join(self.all_branches)
+        print("Branches available are:")
+        print("\n".join(self.all_branches))
 
 # TODO inheret the MutableSequence attributes of the data directly
 #    def __getitem__(self, key)
@@ -631,7 +631,7 @@ class GeomHits(FlatHits):
                                                               self.idx_name])
         # Flatten the volume names and IDs to flat_voldIDs
         flat_ids = np.zeros(self.n_hits)
-        for row, idx, hit in zip(row_data, idx_data, range(self.n_hits)):
+        for row, idx, hit in zip(row_data, idx_data, list(range(self.n_hits))):
             flat_ids[hit] = self.geom.point_lookup[row, idx]
         # Save this column and name it
         flat_id_column = flat_ids.astype(int)
@@ -978,10 +978,10 @@ class CDCHits(GeomHits):
         sig_occ = np.average(occ[0, :])
         back_occ = np.average(occ[1, :])
         avg_occ = np.average(occ[2, :])
-        print "Sig Occ: {} , Back Occ : {}".format(sig_occ, back_occ)
-        print "All Occ: {}, {}".format(avg_occ, avg_occ/self.geom.n_points)
-        print "NumHits: {}".format(avg_n_hits)
-        print "MinMultiHit: {}".format((avg_n_hits - avg_occ)/float(avg_occ))
+        print("Sig Occ: {} , Back Occ : {}".format(sig_occ, back_occ))
+        print("All Occ: {}, {}".format(avg_occ, avg_occ/self.geom.n_points))
+        print("NumHits: {}".format(avg_n_hits))
+        print("MinMultiHit: {}".format((avg_n_hits - avg_occ)/float(avg_occ)))
         return occ
 
 class CTHHits(GeomHits):
@@ -1050,7 +1050,7 @@ class CTHHits(GeomHits):
         row_data = np.vectorize(self.geom.chan_to_row)(chan_data)
         # Flatten the volume names and IDs to flat_voldIDs
         flat_ids = np.zeros(self.n_hits)
-        for row, idx, hit in zip(row_data, idx_data, range(self.n_hits)):
+        for row, idx, hit in zip(row_data, idx_data, list(range(self.n_hits))):
             flat_ids[hit] = self.geom.point_lookup[row, idx]
         # Save this column and name it
         flat_id_column = flat_ids.astype(int)
@@ -1131,10 +1131,10 @@ class CTHHits(GeomHits):
                 fourth_uniq_hit = uniq_idxs[(np.abs(uniq_idxs-3)).argmin()]
                 fourth_vol_hit = trig_hits[fourth_uniq_hit]
             except:
-                print "Error in trigger logic!!\n"+\
+                print("Error in trigger logic!!\n"+\
                       "Trig vols : {}\n".format(trig_vols)+\
                       "Uniq idx : {}\n".format(uniq_idxs)+\
-                      "Event : {}".format(event)
+                      "Event : {}".format(event))
             self.data[self.trig_name][trig_hits] = \
                     self.data[self.time_name][fourth_vol_hit]
 
@@ -1222,9 +1222,9 @@ class CyDetHits(FlatHits):
         Print the names of the data available once you are done
         """
         # Print status message
-        print "CTH Branches:"
+        print("CTH Branches:")
         self.cth.print_branches()
-        print "CDC Branches:"
+        print("CDC Branches:")
         self.cdc.print_branches()
 
     def trim_events(self, events):
