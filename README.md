@@ -124,6 +124,7 @@ from these features, the properties of neighbouring hits are also considered.
 For each hit, this add four more features: 
  * The energy deposition on the wires to the left and right, if any
  * The timing of the hit on the wires to the left and right, if any.
+
 The classification power of these features come from the fact that signal-like 
 hits are often flanked by other signal-like hits. These four features, combined 
 with the original three local features, define a total set of 7 features, which 
@@ -226,6 +227,7 @@ the effectiveness of:
   * A GBDT on the local features
   * A GBDT on the local + neighbour features
   * A GBDT on the local + neighbour + track features
+
 As we can see, introducing more features consistently improves our 
 classification abilities. 
 
