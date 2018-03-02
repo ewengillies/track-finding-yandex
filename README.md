@@ -91,16 +91,45 @@ The track finding algorithm must group signal hits in a given event so that the
 track fitting algorithm can fit a trajectory to the hits. As a first step, the 
 proposed algorithm filters out all background hits. The image below shows 
 a signal track, blue, leaving the aluminium target in the middle, entering the 
-cylindrical detector, and leaving hits on the wires it passes. 
+cylindrical detector, and leaving hits on the wires it passes. All of the hits 
+in red are from background particles.  
 
 <p align="center">
     <img src="https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/paricle_through_detector.png" width="500">
 </p>
 
+### Features of a Hit
 
+A hit is characterized by three main "local features" in this geometry: 
+  * The amount of energy deposited, 
+  * The time which the hit occurred,
+  * The radial distance of the hit from the target.
+
+By design, the amount of energy deposited is already a great feature for 
+classification. Many of the background particles leaving the red hits are 
+protons, which deposit more energy than electrons. Traditionally, physicists 
+would cut on this feature as the basis of a classification algorithm. The 
+picture below compares the normalized distributions of energy depositions for 
+signal and background particles.  Note the logarithmic x-axis.  **The 
+performance of the algorithm will often be compared to the performance of only 
+using this feature, and not considering any others.**
+
+<p align="center">
+    <img src="https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/edep.png" width="500">
+</p>
+
+Classifying using this set of local features provides signifiant gains over 
+using only the energy deposition.  To harvest even more classification power 
+from these features, the properties of neighbouring hits are also considered.  
+For each hit, this add four more features: 
+ * The energy deposition on the wires to the left and right, if any
+ * The timing of the hit on the wires to the left and right, if any.
+
+<!---
 Before these events are written to disk, the experiment is designed to filter 
 out interactions that are clearly uninteresting, while saving the ones that look 
 as if they may contain a signal electron. This mechanism is referred to as the 
 trigger of the experiment.  Currently, the COMET trigger system is not refined 
 enough, causing it to save a hundred times more events than the current data 
 readout hardware can handle.  
+-->
