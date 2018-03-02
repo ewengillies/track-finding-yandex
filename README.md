@@ -38,7 +38,8 @@ a high intensity muon beam.  These components form the "beamline" of the
 experiment.
 
 <p align="center">
-    <img src="https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/PhaseI_schematic_no_back.png" width="500">
+    <img src="https://github.com/ewengillies/track-finding-yandex/blob/"
+              "update_readme/images/PhaseI_schematic_no_back.png" width="500">
 </p>
 
 The red arrow in the figure above represents the direction of the incoming 
