@@ -124,6 +124,17 @@ from these features, the properties of neighbouring hits are also considered.
 For each hit, this add four more features: 
  * The energy deposition on the wires to the left and right, if any
  * The timing of the hit on the wires to the left and right, if any.
+These four features, combined with the original three local features, define 
+a total set of 7 features, which I will refer to as the "neighbour feature" set.
+
+### Classifying an Event
+
+Lets illustrate the rest of the algorithm by way of an example.  First, lets 
+start with our unfiltered event:
+
+<p align="center">
+    <img src="https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/phase_i_no_background.png" width="500"/> < img src="https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/phase_i_no_background.png" width="500"/>
+</p>
 
 <!---
 Before these events are written to disk, the experiment is designed to filter 
