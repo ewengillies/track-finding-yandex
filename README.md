@@ -21,11 +21,13 @@ scale to this search, we could reach a similar sensitivity if we looked at one
 event per minute since the beginning of the universe (13.8 billion years ago).
 
 Unfortunately, we do not have 13.8 billion years for our search.  To combat 
-this, the COMET experiment is designed to probe a million events per second for 
+this, the COMET experiment is designed to probe millions of events per second for 
 our elusive signal of new physics.  This leads to a *high intenisty* 
 environment, i.e. one with many many particles flying around in the detector.
 
-### The COMET Beamline
+### The COMET Phase-I Beamline
+
+The beamline for COMET refers to the 
 
 
 Before these events are written to disk, the experiment is designed to filter 
