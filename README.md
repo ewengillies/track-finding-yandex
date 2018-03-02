@@ -198,12 +198,36 @@ a signal-track radius away from the most likely track centres."  This defines
 our 8th feature.  Combined with the 7 neighbour features, our new feature set is 
 called the "track feature" set.  The algorithm now trains a new GBDT over these 
 8 features.  As before, we can visualize the output of this classifier on the 
-sample event:
+sample event by weighting each hit by the response to the final algorithm.  Here 
+we drop the hit outlines and only leave the fills:
 
 <p align="center">
     <img src="https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/classified_event.png" width="500"/>
 </p>
 
+We can see that the background hits are nearly all suppressed, with the 
+exception of a few around the signal track, whereas the signal hits are nearly 
+all retained. Success!
+
+### Evaluating Performance
+
+Finally, here are a few plots that summarize the algorithm.  Lets start with the 
+ROC curves. I've phrased these curves in terms of signal hit retention (i.e. 
+true positive rate) vs. background hit rejection (i.e. 1 - false positive rate), 
+and zoomed the axis range in on the regions we care about.  
+
+<p align="center">
+    <img src="https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/roc_curves.png" width="500"/>
+</p>
+
+This plot compares 
+the effectiveness of:
+  * The baseline of cutting on the energy deposition alone
+  * A GBDT on the local features
+  * A GBDT on the local + neighbour features
+  * A GBDT on the local + neighbour + track features
+As we can see, introducing more features consistently improves our 
+classification abilities. 
 
 <!---
 Before these events are written to disk, the experiment is designed to filter 
