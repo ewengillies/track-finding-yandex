@@ -159,7 +159,38 @@ full circles indicate a signal like response:
 </p>
 
 We can see in this event, this vastly improves our ability to spot the signal 
-hits.  
+hits.  Most of the background points are filtered out, while most of the signal 
+like hits remain.  With that said, there are still collections of background 
+hits that are well separated from the signal track pattern. 
+
+To fix these isolated background points, a shape-feature is created for each hit 
+using a circular hough transform.  Essentially, the signal track radius is fed 
+into the algorithm.  The space of potential track centres is discretized.  Each 
+hit uses the signal track radius to determine which of the potential track 
+centres its track could have originated from.  In this way, each hit "votes" on 
+its favourite track centres.  This vote is weighted by the hits response from 
+the first stage of the algorithm, such that signal-like hits get a higher vote. 
+Graphically, we can picture this voting process as below.  In this image, the 
+orange points are the potential track centres.  Their fill is weighted by how 
+many votes they get.  Each green circle corresponds to one hit, where the 
+overlap of this green circle with a track centre awards that track centre with 
+votes: 
+
+<p align="center">
+    <img src="https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/hough_transform_event.png" width="500"/>
+</p>
+
+We can see that in this event, there are two distinct circles in the signal like 
+track (due to the stereometry of the detector, which is not explained here). 
+The algorithm is able to detect both of these as likely track centres. The trick 
+now is to invert the transformation to allow the most likely track centres to 
+pick out the hit points that they correspond to.  The "best" track centre can be 
+determined by exponentially reweighing the voting score for each track centre, 
+then to invert the mapping.  Graphically, this looks like: 
+
+<p align="center">
+    <img src="https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/inverse_hough_transform_event.png" width="500"/>
+</p>
 
 <!---
 Before these events are written to disk, the experiment is designed to filter 
