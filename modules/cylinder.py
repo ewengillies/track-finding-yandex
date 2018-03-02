@@ -1,4 +1,5 @@
 import numpy as np
+from root_numpy import root2array
 import math
 from scipy.sparse import lil_matrix, find
 from scipy.spatial.distance import pdist, squareform
@@ -18,95 +19,113 @@ class CylindricalArray(object):
             and self.__dict__ == other.__dict__)
     def __ne__(self, other):
         return not self.__eq__(other)
-    def __init__(self, n_by_layer, r_by_layer, phi0_by_layer):
-        """
-        This defines a cylindrical array of points from a layers.  It returns a
-        flat enumerator of the points in the array, as well as pairwise
-        distances between all points, and the neighbours of each point.  It also
-        stores the position in both cartesian and polar coordinates of each
-        point.
 
-        :param n_by_layer: list of number of points by layer, sorted by radii of
-                           corresponding layer
-        :param r_by_layer: list of radii of each layer, sorted by radii
-        :param phi0_by_layer: angular displacement of the first point of each
-                              layer
+
+    def __init__(self, wire_x, wire_y, layerID):
+        """
+        This defines a cylindrical array of points read in from positional
+        information, including IDs.
+
+        It returns a flat enumerator of the points in the array, as well as
+        pairwise distances between all points, and the neighbours of each point.
+        It also stores the position in both cartesian and polar coordinates of
+        each point.
+
+        :param :
 
         """
-        self.n_by_layer = n_by_layer
-        self.r_by_layer = r_by_layer
-        self.phi0_by_layer = phi0_by_layer
+        self.point_x = wire_x
+        self.point_y = wire_y
+        self.point_layers = layerID
+        _, self.n_by_layer = np.unique(layerID, return_counts=True)
+        self.first_point = self._get_first_point(self.n_by_layer)
         self.n_points = sum(self.n_by_layer)
+        self.point_lookup = self._prepare_points_lookup(self.n_by_layer)
+        self.point_layers = np.repeat(np.arange(self.n_by_layer.size),
+                                          self.n_by_layer)
+        self.point_indexes = np.arange(self.n_points) -\
+                self.first_point[self.point_layers]
+        self.dphi_by_layer = self._prepare_dphi_by_layer(self.n_by_layer)
 
-        self.first_point = self._get_first_point()
-        self.dphi_by_layer = self._prepare_dphi_by_layer()
-        self.point_lookup = self._prepare_points_lookup()
-        self.point_rhos = self._prepare_point_rho()
-        self.point_layers = np.round(((self.point_rhos - self.point_rhos[0])/1.6))
-        self.point_layers = self.point_layers.astype(int)
-        self.point_phis = self._prepare_point_phi()
-        self.point_x, self.point_y = self._prepare_point_cartesian()
+        self.point_rhos = np.sqrt(np.square(wire_x)+np.square(wire_y))
+        self.point_phis = np.arctan2(wire_y, wire_x)
+
         self.point_pol = self._prepare_polarity()
         self.point_dists = self._prepare_point_distances()
         self.point_neighbours, self.lr_neighbours = \
-            self._prepare_point_neighbours()
+            self._prepare_point_neighbours(self.point_phis[self.first_point])
 
-    def _get_first_point(self):
+    def _old_constructor(self, in_n_by_layer, in_r_by_layer, in_phi0_by_layer):
+        n_by_layer = np.array(in_n_by_layer)
+        r_by_layer = np.array(in_r_by_layer)
+        phi0_by_layer = np.array(in_phi0_by_layer)
+        n_points = sum(n_by_layer)
+        first_point = self._get_first_point(n_by_layer)
+        dphi_by_layer = self._prepare_dphi_by_layer(n_by_layer)
+        point_rhos = self._prepare_point_rho(first_point, n_points,
+                                             n_by_layer, r_by_layer)
+        point_layers = np.repeat(np.arange(n_by_layer.size), n_by_layer)
+        point_phis = self._prepare_point_phi(n_points, first_point,
+                                             n_by_layer, phi0_by_layer,
+                                             dphi_by_layer)
+        point_x, point_y = self._prepare_point_cartesian(point_rhos, point_phis)
+        return point_x, point_y, point_layers
+
+    def _get_first_point(self, n_by_layer):
         """
         Returns the point_id of the first point in each layer
 
         :return: numpy array of first point in each layer
         """
-        first_point = np.zeros(len(self.n_by_layer), dtype=int)
-        for i in range(len(self.n_by_layer)):
-            first_point[i] = sum(self.n_by_layer[:i])
+        first_point = np.zeros(len(n_by_layer), dtype=int)
+        for i in range(len(n_by_layer)):
+            first_point[i] = sum(n_by_layer[:i])
         return first_point
 
-    def _prepare_points_lookup(self):
+    def _prepare_points_lookup(self, n_by_layer):
         """
         Prepares lookup table to map from [layer_id, point_index] -> point_id
 
         :return:
         """
-        lookup = np.zeros([len(self.n_by_layer),
-                           max(self.n_by_layer)], dtype='int')
+        lookup = np.zeros([len(n_by_layer),
+                           max(n_by_layer)], dtype='int')
         lookup[:, :] = - 1
         point_id = 0
-        for layer_id, layer_size in enumerate(self.n_by_layer):
+        for layer_id, layer_size in enumerate(n_by_layer):
             for cell_id in range(layer_size):
                 lookup[layer_id, cell_id] = point_id
                 point_id += 1
-        assert point_id == sum(self.n_by_layer)
+        assert point_id == sum(n_by_layer)
         return lookup
 
-    def _prepare_point_rho(self):
+    def _prepare_point_rho(self, point_0, n_points, n_by_layer, r_by_layer):
         """
         Prepares lookup table to map from point_id to the radial position
 
         :return: numpy.array of shape [n_points]
         """
-        point_0 = self.first_point
-        radii = np.zeros(self.n_points, dtype=float)
-        for lay, size in enumerate(self.n_by_layer):
-            radii[point_0[lay]:point_0[lay] + size] = self.r_by_layer[lay]
+        radii = np.zeros(n_points, dtype=float)
+        for lay, size in enumerate(n_by_layer):
+            radii[point_0[lay]:point_0[lay] + size] = r_by_layer[lay]
         return radii
 
-    def _prepare_point_phi(self):
+    def _prepare_point_phi(self, n_points, point_0, n_by_layer,
+                                 phi0_by_layer, dphi_by_layer):
         """
         Prepares lookup table to map from point_id to the angular position
 
         :return: numpy.array of shape [n_points]
         """
-        angles = np.zeros(self.n_points, dtype=float)
-        point_0 = self.first_point
-        for lay, layer_size in enumerate(self.n_by_layer):
+        angles = np.zeros(n_points, dtype=float)
+        for lay, layer_size in enumerate(n_by_layer):
             for point in range(layer_size):
-                angles[point_0[lay] + point] = (self.phi0_by_layer[lay]
-                                              + self.dphi_by_layer[lay]*point)
+                angles[point_0[lay] + point] = (phi0_by_layer[lay]
+                                              + dphi_by_layer[lay]*point)
         angles %= 2 * math.pi
         return angles
 
-    def _prepare_point_cartesian(self):
+    def _prepare_point_cartesian(self, point_rhos, point_phis):
         """
         Returns the positions of each point in cartesian system
 
@@ -114,8 +133,8 @@ class CylindricalArray(object):
          - first one contains x coordinates
          - second one contains y coordinates
         """
-        x_coor = self.point_rhos * np.cos(self.point_phis)
-        y_coor = self.point_rhos * np.sin(self.point_phis)
+        x_coor = point_rhos * np.cos(point_phis)
+        y_coor = point_rhos * np.sin(point_phis)
         return x_coor, y_coor
 
     def _prepare_point_distances(self):
@@ -128,7 +147,7 @@ class CylindricalArray(object):
         distances = pdist(point_xy)
         return squareform(distances)
 
-    def _prepare_point_neighbours(self):
+    def _prepare_point_neighbours(self, phi0_by_layer):
         """
         Returns a sparse array of neighbour relations, where slicing should be
         done in the row index, i.e. find(neighbours[point_0,:]) will return the
@@ -173,7 +192,7 @@ class CylindricalArray(object):
                     # Find point in adjacent layer closest in phi to
                     # current point
                     # Account for phi0
-                    a_point = rel_pos - (self.phi0_by_layer[a_lay]/(2*math.pi))
+                    a_point = rel_pos - (phi0_by_layer[a_lay]/(2*math.pi))
                     # Find index of adjacent layer point
                     a_point *= a_n_points
                     a_point = round(a_point)
@@ -193,12 +212,12 @@ class CylindricalArray(object):
                     neigh[point, prv_a_point] = 1  # Above/Below Anti-Clockwise
         return neigh.tocsr(), lr_neigh.tocsr()
 
-    def _prepare_dphi_by_layer(self):
+    def _prepare_dphi_by_layer(self, n_by_layer):
         """
         Returns the phi separation of the points as defined by the number of
         points in the layer
         """
-        return 2 * math.pi / np.asarray(self.n_by_layer)
+        return 2 * math.pi / np.asarray(n_by_layer)
 
     def _prepare_polarity(self):
         """
@@ -244,27 +263,23 @@ class CylindricalArray(object):
         """
         return self.point_x, self.point_y
 
-    def get_layer(self, point_id):
+    def get_layers(self, point_id):
         """
         Returns the layer index of a given point_id
 
         :return: Index of layer where point_id is
         """
-        rho = self.point_rhos[point_id]
-        layer = int(np.where(self.r_by_layer == rho)[0])
-        return layer
+        return self.point_layers[point_id]
 
-    def get_index(self, point_id):
+    def get_indexes(self, point_id):
         """
         Returns the point index of a given point_id
 
         :return: Index of layer where point_id is
         """
-        layer = self.get_layer(point_id)
-        index = point_id - self.first_point[layer]
-        return index
+        return self.point_indexes[point_id]
 
-    def shift_wire(self, point_id, shift_size):
+    def shift_wires(self, shift_size, point_id=None):
         """
         Get the index of the wire that is displaced from point_id by
         shift_size points counter clockwise in the same layer,
@@ -272,8 +287,10 @@ class CylindricalArray(object):
 
         :return: index of point shift_size  counter clockwise of point_id
         """
-        layer = self.get_layer(point_id)
-        index = self.get_index(point_id)
+        if point_id is None:
+            point_id = np.arange(self.n_points)
+        layer = self.get_layers(point_id)
+        index = self.get_indexes(point_id)
         index += shift_size
         index %= self.n_by_layer[layer]
         new_point = self.point_lookup[layer, index]
@@ -289,8 +306,8 @@ class CylindricalArray(object):
         :return: index of point n_points_in_layer*shft_frac points
                  counter clockwise of point_id
         """
-        layer = self.get_layer(point_id)
-        index = self.get_index(point_id)
+        layer = self.get_layers(point_id)
+        index = self.get_indexes(point_id)
         n_points_in_layer = self.n_by_layer[layer]
         shift_size = int(round(shift_frac * (n_points_in_layer-1)))
         index += shift_size
@@ -299,43 +316,71 @@ class CylindricalArray(object):
         return new_point
 
 
-class CyDet(CylindricalArray):
+class CDC(CylindricalArray):
     def __init__(self, projection=0.5):
         """
         Defines the Cylindrical Detector Geometry
         """
         # Number of wires in each layer
-        cydet_wires = [198, 204, 210, 216, 222, 228, 234, 240, 246,
-                       252, 258, 264, 270, 276, 282, 288, 294, 300] 
+        cdc_wires = [198, 204, 210, 216, 222, 228, 234, 240, 246,
+                     252, 258, 264, 270, 276, 282, 288, 294, 300]
         # Radius at end plate
-        cydet_radii = [53.0, 54.6, 56.2, 57.8, 59.4, 61.0, 62.6, 64.2, 65.8,
-                       67.4, 69.0, 70.6, 72.2, 73.8, 75.4, 77.0, 78.6, 80.2]
+        cdc_radii = [53.0, 54.6, 56.2, 57.8, 59.4, 61.0, 62.6, 64.2, 65.8,
+                     67.4, 69.0, 70.6, 72.2, 73.8, 75.4, 77.0, 78.6, 80.2]
         # Phi0 at end plate
-        cydet_phi0 = [0.015867, 0.015400, 0.000000, 0.014544, 0.00000, 0.000000,
-                      0.013426, 0.000000, 0.012771, 0.00000, 0.012177, 0.000000,
-                      0.011636, 0.000000, 0.00000, 0.000000, 0.010686, 0.000000]
+        # cdc_phi0 = [0.015867, 0.015400,
+                     # 0.000000, 0.014544,
+                     # 0.00000, 0.000000,
+                     # 0.013426, 0.000000,
+                     # 0.012771, 0.00000,
+                     # 0.012177, 0.000000,
+                     # 0.011636, 0.000000,
+                     # 0.00000, 0.000000,
+                     # 0.010686, 0.000000]
+        # Phi0 in the middle plane
+        cdc_phi0 = [-0.079333, 0.107800,
+                    -0.089760, 0.101810,
+                    -0.084908, 0.082674,
+                    -0.067127, 0.078540,
+                    -0.063853, 0.074800,
+                    -0.060884, 0.071400,
+                    -0.058177, 0.068296,
+                    -0.077983, 0.076358,
+                    -0.064114, 0.073304]
+        # Add needed  180 degree shift for wire ID to match with global to local
+        # coordinate shift
+        cdc_phi0 = [phi_0 + np.pi for phi_0 in cdc_phi0]
         # Define the maximum angular shift of the wires in each layer from end
-        # plate to the next  
+        # plate to the next
         self.phi_shft = np.array([-0.190400, 0.184800, -0.179520, 0.174533,
-                                  -0.169816, 0.165347, -0.161107, 0.157080, 
-                                  -0.153248, 0.149600, -0.146121, 0.142800, 
+                                  -0.169816, 0.165347, -0.161107, 0.157080,
+                                  -0.153248, 0.149600, -0.146121, 0.142800,
                                   -0.139626, 0.136591, -0.155966, 0.152716,
                                   -0.149600, 0.146608])
 
+        cdc_phi0 = [p0 - ps/2. for p0, ps in zip(cdc_phi0, self.phi_shft)]
         dphi_from_phi0 = self.theta_at_rel_z(projection)
-        new_radius = self.radius_at_theta(cydet_radii, dphi_from_phi0)
-        new_dphi = dphi_from_phi0 + cydet_phi0
+        new_radius = self.radius_at_theta(cdc_radii, dphi_from_phi0)
+        new_dphi = dphi_from_phi0 + cdc_phi0
 
         # Build the cylindrical array
-        CylindricalArray.__init__(self, cydet_wires, new_radius, new_dphi)
+        point_x, point_y, layer_id = self._old_constructor(cdc_wires,
+                                                           new_radius,
+                                                           new_dphi)
+        #CylindricalArray.__init__(self, cdc_wires, new_radius, new_dphi)
+        # Build the cylindrical array
+        CylindricalArray.__init__(self, point_x, point_y, layer_id)
+
+        # Give it a recbe wiring
+        self.recbe = RECBE(self)
 
     def theta_at_rel_z(self, z_dist, total_z=1.0):
         """
         Get the angular displacement of the wires in each layer as a function of
         the relative z_distance traversed
 
-        :param z_dist:   z distance down CyDet volume
-        :param total_z:  total z distance of CyDet volume
+        :param z_dist:   z distance down CDC volume
+        :param total_z:  total z distance of CDC volume
 
         :return: numpy array of angular shifts, one per layer
         """
@@ -363,20 +408,20 @@ class CyDet(CylindricalArray):
         Get the new radial distance of a wire as a function of :
           * The total angular displacement of the wire-hole between end plates
           * The angle displacement subtended
-        
+
         Note the angular displacment subtended must be less than the total
-        angular displacement by definition.  
+        angular displacement by definition.
         """
         assert not np.any(np.abs(this_theta) > np.abs(self.phi_shft)),\
             "The input angle is larger than the absoulte angular difference\n"+\
             "Abs. Diff. {} \n".format(self.phi_shft)+\
             "Reqs. Ang. {} \n".format(this_theta)
-        return abs(radius*np.cos(self.phi_shft/2.)/np.cos(self.phi_shft/2. - this_theta))
-        
+        return abs(radius*np.cos(self.phi_shft/2.)/\
+                          np.cos(self.phi_shft/2. - this_theta))
 
 class CTH(CylindricalArray):
     # pylint: disable=too-many-instance-attributes
-    def __init__(self, left_handed=False):
+    def __init__(self, left_handed=True):
         """
         Defines the CTH geometry.  Note Cherenkov counter and light guide read
         out to the same volume here
@@ -385,49 +430,97 @@ class CTH(CylindricalArray):
         self.n_crystals = 64
         # The first two rows are for the active volumes, third is for excluded
         # volumes
-        cth_n_vols = [self.n_crystals, self.n_crystals, self.n_crystals]
-        cth_radii = [44.8, 48.5, 0.0]
-        cth_phi0 = [-90., -90., -90.]
-        CylindricalArray.__init__(self, cth_n_vols, cth_radii, cth_phi0)
+        cth_n_vols = [self.n_crystals, self.n_crystals,
+                      self.n_crystals, self.n_crystals, self.n_crystals]
+        cth_radii = [44.78, 48.28, 44.78, 48.28, 0]
+        cth_phi0 = [(-360/(2.*self.n_crystals)) * np.pi/180.,
+                    (-360/(2.*self.n_crystals)) * np.pi/180.,
+                    (-180 + 360/(2.*self.n_crystals)) * np.pi/180.,
+                    (-180 + 360/(2.*self.n_crystals)) * np.pi/180.,
+                    0]
+        point_x, point_y, layer_id = self._old_constructor(cth_n_vols,
+                                                           cth_radii,
+                                                           cth_phi0)
+        CylindricalArray.__init__(self, point_x, point_y, layer_id)
 
-        # Store the active volume names
-        self.chrn_name = "TriChe"
-        self.chlg_name = "TriCheL"
-        self.scnt_name = "TriSci"
-        self.active_names = [self.chrn_name, self.chlg_name, self.scnt_name]
+        # Get drawing parameters
+        ## WIDTH HEIGHT DEFLECTION_ANGLE
+        self.cherenkov_params = [1, 9, 20]
+        self.scintillator_params = [0.5, 9, 13]
+        # Convenience naming
+        self.cher_crys = self.point_lookup[0:4:2].flatten()
+        self.scin_crys = self.point_lookup[1:4:2].flatten()
+        self.up_crys = self.point_lookup[0:2].flatten()
+        self.up_cher = self.point_lookup[0]
+        self.up_scin = self.point_lookup[1]
+        self.down_crys = self.point_lookup[2:4].flatten()
+        self.down_cher = self.point_lookup[2]
+        self.down_scin = self.point_lookup[3]
+        self.fiducial_crys = self.point_lookup[:4].flatten()
 
-        # Store the passive volume names
-        self.chpm_name = "TriCheP"
-        self.scpm_name = "TriSciP"
-        self.sclg_name = "TriSciL"
-        self.passive_names = [self.chpm_name, self.scpm_name, self.sclg_name]
+    def _get_channel_bits(self, channel):
+        """
+        Get the integer representation of the 10 most significant bits of the
+        channel id
+        """
+        return int("{0:025b}".format(channel)[:10], 2)
 
-        # Map volume names to row indexes
-        self.name_to_row = dict()
-        # Cherenkov volumes to inner ring
-        self.name_to_row[self.chrn_name] = 0
-        # Map the cherenkov light guide volumes to the cherenkov volumes
-        self.name_to_row[self.chlg_name] =\
-                self.name_to_row[self.chrn_name]
-        # Map the scintillator to the outer ring
-        self.name_to_row[self.scnt_name] = 1
-        # Map the passive volumes to the passive row index
-        for vol in self.passive_names:
-            self.name_to_row[vol] = 2
-        # Position to column
-        self.pos_to_col = dict()
-        self.pos_to_col['U'] = 1
-        self.pos_to_col['D'] = 0
+    def chan_to_row(self, channel):
+        """
+        Maps :
+            Upstream:
+                Cherenkov counters and LG : 0
+                Scintillators             : 1
+                Scintillator LG           : 4
+            Downstream:
+                Cherenkov counters and LG : 2
+                Scintillators             : 3
+                Scintillator LG           : 4
+        """
+        # Mask out the CTH channel bits
+        trimmed_channel = self._get_channel_bits(channel)
+        # MSB is upstream mask
+        is_upstream = 1 << 9
+        # LSB is light guide boolean mask
+        is_lg_mask = 1 << 0
+        # Next bit is scintillator mask
+        is_sc_mask = 1 << 1
+        # Map downstream to rows [3-5]
+        row_offset = 0
+        if not trimmed_channel & is_upstream:
+            row_offset = 2
+        # Map both cherenkov light guide and cherenkov counter to same volume
+        if not trimmed_channel & is_sc_mask:
+            return 0 + row_offset
+        # Map the scintillator to the next row
+        elif not trimmed_channel & is_lg_mask:
+            return 1 + row_offset
+        # Ignore the scintillator light guide
+        else:
+            return 4
 
-    def _prepare_dphi_by_layer(self):
+    def chan_to_module(self, channel):
+        """
+        Return upstream or downstream module flag from channel ID
+        """
+        # Mask out the CTH channel bits
+        trimmed_channel = self._get_channel_bits(channel)
+        # LSB is light guide boolean mask
+        is_upstream = 1 << 9
+        return bool(trimmed_channel & is_upstream)
+
+
+    def _prepare_dphi_by_layer(self, n_by_layer):
         """
         Returns the phi separation of the points as defined by the number of
         points in the layer
         """
         if self.left_handed:
-            return -2 * math.pi / np.asarray(self.n_by_layer)
+            # Downstream is left handed, upstream is right handed
+            handedness = np.asarray([-1, -1, 1, 1, 1])
+            return 2 * math.pi / (np.asarray(n_by_layer) * handedness)
         else:
-            return 2 * math.pi / np.asarray(self.n_by_layer)
+            return 2 * math.pi / np.asarray(n_by_layer)
 
 class TrackCenters(CylindricalArray):
     def __init__(self, r_min=10., r_max=50., rho_bins=10, arc_bins=0):
@@ -458,5 +551,45 @@ class TrackCenters(CylindricalArray):
         n_track_cent = [int(round(2 * math.pi * r_track_cent[n] / arc_res))
                         for n in range(rho_bins)]
         phi0_track_cent = [0] * rho_bins
-        CylindricalArray.__init__(self, n_track_cent, r_track_cent, \
-                phi0_track_cent)
+        point_x, point_y, layer_id = self._old_constructor(n_track_cent,
+                                                           r_track_cent,
+                                                           phi0_track_cent)
+        CylindricalArray.__init__(self, point_x, point_y, layer_id)
+
+class RECBE(CylindricalArray):
+    def __init__(self, cdc, file_name=None):
+        # Default file name
+        recbe_file = "/home/five4three2/development/ICEDUST/"+\
+                     "track-finding-yandex/data/chanmap_20160814.root"
+        # Set file name
+        if not file_name is None:
+            recbe_file = file_name
+        # Get the sense wires
+        selection = "isSenseWire == 1 && LayerID > 0 && LayerID < 19"
+        recbe_arr = root2array(recbe_file, selection=selection,
+                               branches=["LayerID", "CellID", "BoardID",
+                                         "BrdLayID", "BrdLocID", "ChanID"])
+        recbe_arr["LayerID"] = recbe_arr["LayerID"] - 1
+        # Get the board mapping
+        self.wire_to_board = recbe_arr["BoardID"][cdc.point_lookup[\
+                                                    recbe_arr["LayerID"],
+                                                    recbe_arr["CellID"]]]
+        brds = np.unique(self.wire_to_board)
+        self.board_to_wires = \
+            np.array([np.where(self.wire_to_board == val)[0] for val in brds])
+
+        # Get the positions of the board
+        board_x = np.array([np.average(cdc.point_x[self.board_to_wires[brd]])\
+                                                           for brd in brds])
+        board_y = np.array([np.average(cdc.point_y[self.board_to_wires[brd]])\
+                                                           for brd in brds])
+
+        # Get the board layers by board ID
+        all_ids = np.unique(recbe_arr["BoardID"])
+        board_lay = np.zeros(len(all_ids))
+        for brd in all_ids:
+            brd_id_wires = np.where(recbe_arr["BoardID"] == brd)
+            board_lay[brd] = np.unique(recbe_arr["BrdLayID"][brd_id_wires])[0]
+
+        # Construct the array
+        CylindricalArray.__init__(self, board_x, board_y, board_lay)

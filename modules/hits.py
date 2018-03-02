@@ -1,26 +1,34 @@
 import numpy as np
-import numpy.lib.recfunctions
 from root_numpy import root2array
-from cylinder import CyDet, CTH
-from random import Random
-from collections import Counter
-
+from cylinder import CDC, CTH
 """
 Notation used below:
  - wire_id is flat enumerator of all wires
  - layer_id is the index of layer
  - wire_index is the index of wire in the layer
 """
+def _return_branches_as_list(branches):
+    """
+    Ensures branches are given as list
+    """
+    # Deal with requested branches
+    if branches is None:
+        branches = []
+    if not isinstance(branches, list):
+        branches = [branches]
+    return branches
 
 class FlatHits(object):
     # pylint: disable=too-many-instance-attributes
     # pylint: disable=bad-continuation
     def __init__(self,
-                 path="../data/151208_SimChen_noise.root",
-                 tree='tree',
+                 path,
+                 tree='COMETEventsSummary',
+                 selection=None,
                  prefix="CDCHit.f",
                  branches=None,
-                 hit_type_name="HitType",
+                 empty_branches=None,
+                 hit_type_name="IsSig",
                  key_name="EventNumber",
                  use_evt_idx=True,
                  signal_coding=1,
@@ -52,91 +60,80 @@ class FlatHits(object):
         self.signal_coding = signal_coding
         self.n_events = n_evts
         self.use_evt_idx = use_evt_idx
+        self.selection = selection
         # Set the number of hits, the number of events, and data to None so that
         # the the next import_root_file knows its the first call
         self.n_hits, self.data = (None, None)
 
-        # Deal with requested branches
-        # Ensure branches are given as list
-        if branches is None:
-            branches = []
-        if not isinstance(branches, list):
-            branches = [branches]
+        # Ensure we have a list type of branches
+        empty_branches = _return_branches_as_list(empty_branches)
+        branches = _return_branches_as_list(branches)
         # Append the prefix if it is not provided
         branches = [self.prefix + branch
                     if not branch.startswith(self.prefix)
                     else branch
                     for branch in branches]
         # Ensure hit type is imported in branches
-        if self.hit_type_name not in branches:
-            branches += [self.hit_type_name]
+        branches, empty_branches = self._add_name_to_branches(path, tree,
+                                                              self.hit_type_name,
+                                                              branches,
+                                                              empty_branches)
 
-        # Initialize our data and look up tables
-        self.hits_to_events, self.event_to_hits, self.event_to_n_hits =\
-            self._get_event_to_hits_lookup(path,
-                                           tree=tree)
+        # Declare out lookup tables
+        self.hits_to_events = None
+        self.event_to_hits = None
+        self.event_to_n_hits = None
+        # Get the number of hits for each event
+        self._generate_event_to_n_hits_table(path, tree)
+        # Fill the look up tables
+        self._generate_lookup_tables()
 
-        # Set the number of hits and events for this data
-        self.n_hits = len(self.hits_to_events)
-        self.n_events = len(self.event_to_n_hits)
+        # Declare the counters
+        self.n_hits = None
+        self.n_events = None
+        # Fill the counters
+        self._generate_counters()
 
         # Get the hit data we want
-        if not branches is None:
+        if branches:
             data_columns = self._import_root_file(path, tree=tree,
                                                branches=branches)
         # Default to empty list
         else:
             data_columns = []
 
-        # Label each hit with the number of hits in its event
+        # Label each hit with the number of hits its import key
         all_key_column = self._import_root_file(path, tree=tree,
                                                 branches=self.key_name)
 
-        # Index each hit
+        # Index each hit by hit ID and by event index
         self.hits_index_name = self.prefix + "hits_index"
-        hits_index_column = [np.arange(self.n_hits)]
-
-        # Index each hit
         self.event_index_name = self.prefix + "event_index"
-        event_index_column = [self.hits_to_events]
+        # Index each hit by hit and event
+        event_index_column = self.hits_to_events
+        hits_index_column = np.arange(self.n_hits)
 
         # Zip it all together in a record array
         self.all_branches = branches + [self.key_name] +\
                                        [self.hits_index_name] +\
                                        [self.event_index_name]
-        self.data = data_columns + all_key_column + hits_index_column +\
-                    event_index_column
+        self.data = data_columns + all_key_column + \
+                    [hits_index_column] + [event_index_column]
+
+        # Add in the empty branches
+        empty_branches = _return_branches_as_list(empty_branches)
+        # TODO fix hack
+        empty_branches = np.unique(empty_branches)
+        for branch in empty_branches:
+            if branch == self.hit_type_name:
+                self.data += [np.zeros(self.n_hits, dtype=bool)]
+            else:
+                self.data += [np.zeros(self.n_hits)]
+            self.all_branches += [branch]
 
         # Finialize the data if this is the final form
         if finalize_data:
             self._finalize_data()
-
-    def _trim_lookup_tables(self, events):
-        """
-        Trim the lookup tables to the given event indexes
-        """
-        # Trim the event indexed tables
-        self.event_to_n_hits = self.event_to_n_hits[events]
-        self.hits_to_events, self.event_to_hits =\
-            self._generate_lookup_tables(self.event_to_n_hits)
-        # Set the number of hits and events for this data
-        self.n_hits = len(self.hits_to_events)
-        self.n_events = len(self.event_to_n_hits)
-
-    def _finalize_data(self):
-        """
-        Zip up the data into a rec array if this is the highest level class of
-        this instance
-        """
-        self.data = np.rec.fromarrays(self.data, names=(self.all_branches))
-
-    def print_branches(self):
-        """
-        Print the names of the data available once you are done
-        """
-        # Print status message
-        print "Branches available are:"
-        print "\n".join(self.all_branches)
 
     def _check_for_branches(self, path, tree, branches, soft_check=False):
         """
@@ -149,6 +146,7 @@ class FlatHits(object):
         """
         # Import one event with all the branches to get the names of the
         # branches
+        # TODO use list_branches in root2array here
         dummy_root = root2array(path, treename=tree, start=0, stop=1)
         # Get the names of the imported branches
         availible_branches = dummy_root.dtype.names
@@ -162,9 +160,27 @@ class FlatHits(object):
         elif bad_request:
             # Check that this is zero in length
             assert len(bad_branches) == 0, "ERROR: The requested branches:\n"+\
-                    "\n".join(bad_branches) + "\n are not availible"
+                    "\n".join(bad_branches) + "\n are not availible\n"+\
+                    "The branches availible are:\n"+"\n".join(availible_branches)
         else:
             return True
+
+    def _add_name_to_branches(self, path, tree, name, branches, empty_branches):
+        """
+        Determine which list of branches to put this variable
+        """
+        # Check if this file already has one
+        has_name = self._check_for_branches(path, tree,
+                                               branches=[name],
+                                               soft_check=True)
+        if has_name:
+            branches = _return_branches_as_list(branches)
+            branches += [name]
+        else:
+            empty_branches = _return_branches_as_list(empty_branches)
+            empty_branches += [name]
+        return branches, empty_branches
+
 
     def _import_root_file(self, path, tree, branches):
         """
@@ -184,14 +200,15 @@ class FlatHits(object):
         data_columns = []
         for branch in branches:
             # Count the number of entries to grab
-            if self.use_evt_idx:
-                n_entries = sum(self.event_to_n_hits[:self.n_events])
-            else:
-                n_entries = self.n_events
+            #if self.use_evt_idx:
+            #    n_entries = sum(self.event_to_n_hits[:self.n_events])
+            #else:
+            #    n_entries = self.n_events
+            # TODO absorb event loading limit into selection
             # Grab the branch
             event_data = root2array(path, treename=tree, \
                                     branches=[branch],
-                                    start=0, stop=n_entries)
+                                    selection=self.selection)
             # If we know the number of hits and events, require the branch is as
             # long as one of these
             if (self.n_hits is not None) and (self.n_events is not None):
@@ -217,9 +234,13 @@ class FlatHits(object):
                 # Check that the length of the array makes sense
                 assert (data_length == self.n_hits) or\
                        (data_length == self.n_events),\
-                       "ERROR: The length of the data in the requested "+\
-                       "branch " + branch + " is not the length of the "+\
-                       "number of events or the number of hits"
+                       "ERROR: The length of the data in the requested \n"+\
+                       "branch " + branch + " is not the length of the \n"+\
+                       "number of events or the number of hits.\n"+\
+                       "Entries in branch = {}\n".format(data_length)+\
+                       "Hits in sample = {}\n".format(self.n_hits)+\
+                       "Events in sample = {}\n".format(self.n_events)
+
                 # Add this branch
                 data_columns.append(event_data)
             # If we do not know the number of hits and events, assume its
@@ -229,18 +250,43 @@ class FlatHits(object):
         # Return
         return data_columns
 
-    def _generate_lookup_tables(self, event_to_n_hits):
+    def _generate_event_to_n_hits_table(self, path, tree):
         """
-        Generate mappings between hits and events
+        Creates look up tables to map from event index to number of hits from
+        the root files
+        """
+        # Check the branch we need to define the number of hits is there
+        _ = self._check_for_branches(path, tree, branches=[self.key_name])
+        # Import the data
+        event_data = root2array(path, treename=tree,
+                                branches=[self.key_name],
+                                selection=self.selection)
+        event_data = event_data[self.key_name]
+        # Return the number of hits in each event
+        if self.use_evt_idx:
+            # Check the hits are sorted by event
+            assert np.array_equal(event_data, np.sort(event_data)),\
+                "Event index named {} not sorted".format(self.key_name)
+            # Return the number of hits in each event
+            _, event_to_n_hits = np.unique(event_data, return_counts=True)
+        else:
+            # Assume number of hits per event is stored already
+            event_to_n_hits = event_data.copy().astype(int)
+        # Trim to the requested number of events
+        self.event_to_n_hits = event_to_n_hits[:self.n_events]
+
+    def _generate_lookup_tables(self):
+        """
+        Generate mappings between hits and events from current event_to_n_hits
         """
         # Build the look up tables
         first_hit = 0
         try:
-            hits_to_events = np.zeros(sum(event_to_n_hits))
+            hits_to_events = np.zeros(sum(self.event_to_n_hits))
         except ValueError:
-            print type(event_to_n_hits)
+            print(type(self.event_to_n_hits))
         event_to_hits = []
-        for event, n_hits in enumerate(event_to_n_hits):
+        for event, n_hits in enumerate(self.event_to_n_hits):
             # Record the last hit in the event
             last_hit = first_hit + n_hits
             # Record the range of hit IDs
@@ -250,97 +296,62 @@ class FlatHits(object):
             # Shift to the next event
             first_hit = last_hit
         # Shift the event-to-hit list into a numpy object array
-        event_to_hits = np.array(event_to_hits)
+        self.event_to_hits = np.array(event_to_hits)
         # Ensure all indexes in hits to events are integers
-        hits_to_events = hits_to_events.astype(int)
-        return hits_to_events, event_to_hits
+        self.hits_to_events = hits_to_events.astype(int)
 
-    def _get_event_to_n_hits(self, path, tree):
+    def _generate_counters(self):
         """
-        Creates look up tables to map from event index to number of hits
+        Generate the number of events and number of hits
         """
-        # Check the branch we need to define the number of hits is there
-        _ = self._check_for_branches(path, tree, branches=[self.key_name])
-        # Import the data
-        event_data = root2array(path, treename=tree,
-                                branches=[self.key_name])
-        event_data = event_data[self.key_name]
-        # Return the number of hits in each event
-        if self.use_evt_idx:
-            # Check the hits are sorted by event
-            assert np.array_equal(event_data, np.sort(event_data)),\
-                "Event index named {} not sorted".format(self.key_name)
-            # Return the number of hits in each event
-            event_to_n_hits = np.array(Counter(event_data).items())[:,1]
-        else:
-            # Assume number of hits per event is stored already
-            event_to_n_hits = event_data.copy().astype(int)
-        # Trim to the requested number of events
-        return event_to_n_hits[:self.n_events]
+        self.n_hits = len(self.hits_to_events)
+        self.n_events = len(self.event_to_n_hits)
 
-    def _get_event_to_hits_lookup(self, path, tree):
-        """
-        Creates look up tables to map from events to hits index and from
-        hit to event number
-        """
-        # Get the number of hits for each event
-        event_to_n_hits = self._get_event_to_n_hits(path, tree)
-        # Create a look up table that maps from event number the range of hits
-        # IDs in that event
-        hits_to_events, event_to_hits = \
-                                  self._generate_lookup_tables(event_to_n_hits)
-        # Return the lookup tables
-        return hits_to_events, event_to_hits, event_to_n_hits
-
-    def _set_indexes(self):
+    def _generate_indexes(self):
         '''
         Reset the hit and event indexes
         '''
         self.data[self.hits_index_name] = np.arange(self.n_hits)
         self.data[self.event_index_name] = self.hits_to_events
 
-    def sort_hits(self, variable, ascending=True, reset_index=True):
+    def _reset_all_internal_data(self):
         """
-        Sorts the hits by the given variable inside each event.  By default,
-        this is done in acending order and the hit index is reset after sorting.
+        Reset all look up tables, indexes, and counts
         """
-        # Sort each event internally
-        for evt in range(self.n_events):
-            # Get the hits to sort
-            evt_hits = self.event_to_hits[evt]
-            # Get the sort order of the given variable
-            sort_order = self.data[evt_hits][variable].argsort()
-            # Reverse the order if required
-            if ascending == False:
-                sort_order = sort_order[::-1]
-            # Rearrange the hits
-            self.data[evt_hits] = self.data[evt_hits][sort_order]
-        # Reset the hit index
-        if reset_index == True:
-            self.data[self.hits_index_name] = np.arange(self.n_hits)
+        # Reset the look up tables from the current event_to_n_hits table
+        self._generate_lookup_tables()
+        # Set the number of hits and events for this data
+        self._generate_counters()
+        # Set the indexes
+        self._generate_indexes()
 
-    def get_events(self, events=None, unique=True):
-        """
-        Returns the hits from the given event(s).  Default gets all events
+    def _reset_event_to_n_hits(self):
+        # Find the hits to remove
+        self.event_to_n_hits = np.bincount(self.data[self.event_index_name],
+                                           minlength=self.n_events)
+        # Remove these sums
+        assert (self.event_to_n_hits >= 0).all(),\
+                "Negative number of hits not allowed!"
+        # Trim the look up tables of empty events
+        empty_events = np.where(self.event_to_n_hits > 0)[0]
+        self._trim_lookup_tables(empty_events)
 
-        :param unique: Force each event to only be retrieved once
+    def _trim_lookup_tables(self, events):
         """
-        # Check if we want all events
-        if events is None:
-            return self.data
-        # Allow for a single event
-        if isinstance(events, int):
-            evt_hits = self.event_to_hits[events]
-        # Otherwise assume it is a list of events.
-        else:
-            # Ensure we only get each event once
-            if unique:
-                events = np.unique(events)
-            # Get all the hits we want as flat
-            evt_hits = np.concatenate([self.event_to_hits[evt]\
-                                       for evt in events])
-        # Return the data for these events
-        return self.data[evt_hits]
+        Trim the lookup tables to the given event indexes
+        """
+        # Trim the event indexed tables
+        self.event_to_n_hits = self.event_to_n_hits[events]
+        # Set the lookup tables
+        self._reset_all_internal_data()
+
+    def _finalize_data(self):
+        """
+        Zip up the data into a rec array if this is the highest level class of
+        this instance
+        """
+        self.data = np.rec.fromarrays(self.data, names=(self.all_branches))
+        self._generate_indexes()
 
     def _get_mask(self, these_hits, variable, values=None, greater_than=None,
                   less_than=None, invert=False):
@@ -366,12 +377,66 @@ class FlatHits(object):
             mask = np.logical_not(mask)
         return mask
 
-    def filter_hits(self, these_hits, variable, values=None, greater_than=None,
+    def get_events(self, events=None, unique=True):
+        """
+        Returns the hits from the given event(s).  Default gets all events
+
+        :param unique: Force each event to only be retrieved once
+        """
+        # Check if we want all events
+        if events is None:
+            return self.data
+        # Allow for a single event
+        if isinstance(events, int):
+            evt_hits = self.event_to_hits[events]
+        # Otherwise assume it is a list of events.
+        else:
+            # Ensure we only get each event once
+            # TODO remove and check that this is fine.  Sorts the event ids 
+            # before returning them.  This is bad
+            if unique:
+                events = np.unique(events)
+            # Get all the hits we want as flat
+            evt_hits = np.concatenate([self.event_to_hits[evt]\
+                                       for evt in events])
+        # Return the data for these events
+        return self.data[evt_hits]
+
+    def trim_events(self, events):
+        """
+        Keep these events in the data
+        """
+        self.trim_hits(self.key_name, values=events)
+
+    def sort_hits(self, variable, ascending=True, reset_index=True):
+        """
+        Sorts the hits by the given variable inside each event.  By default,
+        this is done in acending order and the hit index is reset after sorting.
+        """
+        # Sort each event internally
+        for evt in range(self.n_events):
+            # Get the hits to sort
+            evt_hits = self.event_to_hits[evt]
+            # Get the sort order of the given variable
+            sort_order = self.data[evt_hits].argsort(order=variable)
+            # Reverse the order if required
+            if not ascending:
+                sort_order = sort_order[::-1]
+            # Rearrange the hits
+            self.data[evt_hits] = self.data[evt_hits][sort_order]
+        # Reset the hit index
+        if reset_index:
+            self._generate_indexes()
+
+    def filter_hits(self, variable, these_hits=None,
+                    values=None, greater_than=None,
                     less_than=None, invert=False):
         """
         Returns the section of the data where the variable equals
         any of the values
         """
+        if these_hits is None:
+            these_hits = self.get_events()
         mask = self._get_mask(these_hits=these_hits, variable=variable,
                               values=values, greater_than=greater_than,
                               less_than=less_than, invert=invert)
@@ -386,29 +451,35 @@ class FlatHits(object):
         mask = self._get_mask(these_hits=self.data, variable=variable,
                               values=values, greater_than=greater_than,
                               less_than=less_than, invert=invert)
-        # Find the hits to remove
-        remove_mask = np.logical_not(mask)
-        n_hits_removed = np.bincount(self.hits_to_events[remove_mask],
-                                     minlength=self.n_events)
-        # Remove these sums
-        self.event_to_n_hits -= n_hits_removed
-        assert (self.event_to_n_hits >= 0).all(),\
-                "Negative number of hits not allowed!"
         # Remove the hits
         self.data = self.data[mask]
-        # Trim the look up tables of empty events 
-        empty_events = np.where(self.event_to_n_hits > 0)[0]
-        self._trim_lookup_tables(empty_events)
+        self._reset_event_to_n_hits()
 
-    def trim_events(self, events):
+    def add_hits(self, hits, event_indexes=None):
         """
-        Keep these events in the data
+        Append the hits to the current data. If event indexes are supplied, then
+        the hits are added event-wise to the event indexes provided.  Otherwise,
+        they are stacked on top of each event, starting with event 0
         """
-        # TODO have this operate on event_index
-        keep_hits = np.concatenate(self.event_to_hits[events])
-        keep_hits = keep_hits.astype(int)
-        self.data = self.data[keep_hits]
-        self._trim_lookup_tables(events)
+        # TODO fix the fact that flathits will break cause no time_name
+        self.data = np.hstack([self.data, hits])
+        self.data.sort(order=[self.event_index_name, self.time_name])
+        self._reset_event_to_n_hits()
+
+    def remove_branch(self, branch_names):
+        """
+        Remove a branch from the data
+        """
+        if not isinstance(branch_names, list):
+            branch_names = [branch_names]
+        all_names = list(self.data.dtype.names)
+        for branch in branch_names:
+            prefixed_branch = self.prefix + branch
+            if branch in all_names:
+                all_names.remove(branch)
+            elif prefixed_branch in all_names:
+                all_names.remove(prefixed_branch)
+        self.data = self.data[all_names]
 
     def get_other_hits(self, hits):
         """
@@ -424,9 +495,9 @@ class FlatHits(object):
         Default gets hits from all events.
         """
         # Get the events
-        these_hits = self.get_events(events)
-        these_hits = self.filter_hits(these_hits, self.hit_type_name,
-                                      self.signal_coding)
+        these_hits = self.filter_hits(self.hit_type_name,
+                                      these_hits=self.get_events(events),
+                                      values=self.signal_coding)
         return these_hits
 
     def get_background_hits(self, events=None):
@@ -434,10 +505,19 @@ class FlatHits(object):
         Returns the hits from the same event(s) as the given hit list
         Default gets hits from all events.
         """
-        these_hits = self.get_events(events)
-        these_hits = self.filter_hits(these_hits, self.hit_type_name,
-                                      self.signal_coding, invert=True)
+        these_hits = self.filter_hits(self.hit_type_name,
+                                      these_hits=self.get_events(events),
+                                      values=self.signal_coding,
+                                      invert=True)
         return these_hits
+
+    def print_branches(self):
+        """
+        Print the names of the data available once you are done
+        """
+        # Print status message
+        print("Branches available are:")
+        print("\n".join(self.all_branches))
 
 # TODO inheret the MutableSequence attributes of the data directly
 #    def __getitem__(self, key)
@@ -451,22 +531,19 @@ class GeomHits(FlatHits):
     # pylint: disable=unbalanced-tuple-unpacking
     def __init__(self,
                  geom,
-                 path="../data/signal.root",
-                 tree='tree',
-                 n_evts=-1,
-                 branches=None,
+                 path,
+                 tree='COMETEventsSummary',
                  prefix="CDCHit.f",
-                 hit_type_name="HitType",
-                 key_name="EventNumber",
-                 use_evt_idx=True,
+                 branches=None,
+                 empty_branches=None,
                  row_name="layerID",
                  idx_name="cellID",
                  edep_name="Charge",
-                 time_name="t",
+                 time_name="DetectedTime",
                  flat_name="vol_id",
                  trig_name="TrigTime",
-                 signal_coding=1,
-                 finalize_data=True):
+                 finalize_data=True,
+                 **kwargs):
         """
         This generates hit data in a structured array from an input root file
         from a file. It assumes that the hits are associated to some geometrical
@@ -481,17 +558,24 @@ class GeomHits(FlatHits):
         :param signal_coding: value in hit_type_name branch that signifies a
                               signal hit
         """
+        # Name the trigger data row
+        self.trig_name = prefix + trig_name
+        # Add trig name to branches
+        branches, empty_branches = self._add_name_to_branches(path,
+                                                              tree,
+                                                              self.trig_name,
+                                                              branches,
+                                                              empty_branches)
+        # TODO move flat hits to the end
+        # Initialize the base class
         FlatHits.__init__(self,
-                          path=path,
+                          path,
                           tree=tree,
-                          prefix=prefix,
                           branches=branches,
-                          hit_type_name=hit_type_name,
-                          key_name=key_name,
-                          use_evt_idx=use_evt_idx,
-                          signal_coding=signal_coding,
+                          empty_branches=empty_branches,
+                          prefix=prefix,
                           finalize_data=False,
-                          n_evts=n_evts)
+                          **kwargs)
 
         # Get the geometry flat_IDs
         self.row_name = self.prefix + row_name
@@ -524,22 +608,6 @@ class GeomHits(FlatHits):
         self.all_branches.append(self.edep_name)
         self.all_branches.append(self.time_name)
 
-        # Name the trigger data row
-        self.trig_name = self.prefix + trig_name
-        # Check if this file already has one
-        has_trigger = self._check_for_branches(path, tree,
-                                               branches=[self.trig_name],
-                                               soft_check=True)
-        if has_trigger:
-            trig_data = self._import_root_file(path, tree,
-                                               branches=[self.trig_name])
-        else:
-            trig_data = np.zeros(self.n_hits)
-
-        # Add the trigger data
-        self.data.append(trig_data)
-        self.all_branches.append(self.trig_name)
-
         # Finialize the data if this is the final form
         if finalize_data:
             self._finalize_data()
@@ -549,7 +617,7 @@ class GeomHits(FlatHits):
         Zip up the data into a rec array if this is the highest level class of
         this instance and sort by time
         """
-        self.data = np.rec.fromarrays(self.data, names=self.all_branches)
+        super(GeomHits, self)._finalize_data()
         self.sort_hits(self.time_name)
 
     def _get_geom_flat_ids(self, path, tree):
@@ -563,7 +631,7 @@ class GeomHits(FlatHits):
                                                               self.idx_name])
         # Flatten the volume names and IDs to flat_voldIDs
         flat_ids = np.zeros(self.n_hits)
-        for row, idx, hit in zip(row_data, idx_data, range(self.n_hits)):
+        for row, idx, hit in zip(row_data, idx_data, list(range(self.n_hits))):
             flat_ids[hit] = self.geom.point_lookup[row, idx]
         # Save this column and name it
         flat_id_column = flat_ids.astype(int)
@@ -622,7 +690,7 @@ class GeomHits(FlatHits):
         # Select the relevant event from data
         return self.get_hit_vols(events, unique, hit_type="back")
 
-    def get_hit_vector(self, events, unique=True):
+    def get_hit_vector(self, events):
         """
         Returns a vector denoting whether or not a wire has a hit on it. Returns
         1 for a hit, 0 for no hit
@@ -637,12 +705,28 @@ class GeomHits(FlatHits):
         hit_vector[hit_vols] = 1
         return hit_vector
 
+    def get_vol_types(self, events):
+        """
+        Get hits in all volumes by type, 1 is signal, 2 in background, nothing
+        is 0. Signal takes priority.
+
+        :return: numpy.array of shape [Geometry.n_points]
+        """
+        # Get the flat vol IDs for those vols with sig or bkg hits
+        bkg_vols = self.get_bkg_vols(events, unique=True)
+        sig_vols = self.get_sig_vols(events, unique=True)
+        # Make the hit vector
+        hit_vector = np.zeros(self.geom.n_points)
+        hit_vector[bkg_vols] = 2
+        hit_vector[sig_vols] = 1
+        return hit_vector
+
     def get_hit_types(self, events, unique=True):
         """
         Returns all hit types, where signal is 1, background is 2,
         nothing is 0.
 
-        :return: numpy.array of shape [CyDet.n_points]
+        :return: numpy.array of shape [CDC.n_points]
         """
         result = np.zeros(self.n_hits, dtype=int)
         # Get the background hits
@@ -657,7 +741,7 @@ class GeomHits(FlatHits):
         """
         Returns energy deposit in all wires
 
-        :return: numpy.array of shape [CyDet.n_points]
+        :return: numpy.array of shape [CDC.n_points]
         """
         energy_deposit = self.get_measurement(events, self.edep_name)
         return energy_deposit
@@ -666,7 +750,7 @@ class GeomHits(FlatHits):
         """
         Returns the timing of the hit
 
-        :return: numpy.array of shape [CyDet.n_points]
+        :return: numpy.array of shape [CDC.n_points]
         """
         time_hit = self.get_measurement(events, self.time_name)
         return time_hit
@@ -675,7 +759,7 @@ class GeomHits(FlatHits):
         """
         Returns the timing of the trigger on an event
 
-        :return: numpy.array of shape [CyDet.n_points]
+        :return: numpy.array of shape [CDC.n_points]
         """
         # Check the trigger time has been set
         assert "CDCHit.fTrigTime" in self.all_branches,\
@@ -685,41 +769,29 @@ class GeomHits(FlatHits):
     def get_relative_time(self, events):
         """
         Returns the difference between the start time of the hit and the time of
-        the trigger.  This value is capped to the time window of 1170 ns
-        :return: numpy array of (t_start_hit - t_trig)%1170
+        the trigger.
         """
         trig_time = self.get_trigger_time(events)
         hit_time = self.get_hit_time(events)
         return hit_time - trig_time
 
 
-class CyDetHits(GeomHits):
+class CDCHits(GeomHits):
     # pylint: disable=too-many-instance-attributes
     # pylint: disable=bad-continuation
     # pylint: disable=relative-import
     def __init__(self,
-                 path="../data/signal.root",
-                 tree='tree',
-                 branches=None,
+                 path,
+                 tree='COMETEventsSummary',
                  prefix="CDCHit.f",
-                 hit_type_name="HitType",
-                 key_name="EventNumber",
-                 use_evt_idx=True,
-                 row_name="layerID",
-                 idx_name="cellID",
                  chan_name="Channel",
-                 flat_name="vol_id",
-                 time_name="MCPos.fE",
-                 edep_name="Charge",
-                 trig_name="TrigTime",
-                 signal_coding=1,
                  finalize_data=True,
-                 n_evts=-1,
-                 time_offset=0):
+                 time_offset=None,
+                 **kwargs):
         """
         This generates hit data in a structured array from an input root file
         from a file. It assumes the naming convention "CDCHit.f"+ variable for
-        all leaves. It overlays its data on the uses the CyDet class to define
+        all leaves. It overlays its data on the uses the CDC class to define
         its geometry.
 
         :param path: path to rootfile
@@ -736,23 +808,12 @@ class CyDetHits(GeomHits):
         self.chan_name = prefix + chan_name
         # Build the geom hits object
         GeomHits.__init__(self,
-                          CyDet(),
-                          path=path,
+                          CDC(),
+                          path,
                           tree=tree,
-                          branches=branches,
                           prefix=prefix,
-                          hit_type_name=hit_type_name,
-                          key_name=key_name,
-                          use_evt_idx=use_evt_idx,
-                          row_name=row_name,
-                          idx_name=idx_name,
-                          time_name=time_name,
-                          edep_name=edep_name,
-                          flat_name=flat_name,
-                          trig_name=trig_name,
-                          signal_coding=signal_coding,
-                          n_evts=n_evts,
-                          finalize_data=False)
+                          finalize_data=False,
+                          **kwargs)
 
         # Finialize the data if this is the final form
         if finalize_data:
@@ -772,25 +833,57 @@ class CyDetHits(GeomHits):
             return self._import_root_file(path, tree,
                                           branches=[self.chan_name])[0]
         else:
-            return super(CyDetHits, self)._get_geom_flat_ids(path, tree)
+            return super(CDCHits, self)._get_geom_flat_ids(path, tree)
 
-    def get_measurement(self, events, name):
-        """
-        Returns requested measurement in volumes, returning zero if the volume
-        does not register this measurement
 
-        :return: numpy.array of shape [CyDet.n_points]
+    def get_measurement(self, name, events=None, shift=None, default=0,
+                        only_hits=True, flatten=False, use_sparse=False):
         """
-        result = np.zeros(self.geom.n_points, dtype=float)
+        Returns requested measurement in volumes, returning the default value if
+        the hit does not register this measurement
+
+        NOTE: IF COINCIDENCE HASN'T BEEN DEALT WITH THE FIRST HIT ON THE CHANNEL
+        WILL BE TAKEN.  The order is determined by the hits_index
+
+        :return: numpy.array of shape [len(events), CDC.n_points]
+        """
+        # Check if events is empty
+        if events is None:
+            events = np.arange(self.n_events)
+        if isinstance(events, int):
+            events = [events]
+        # Get the events as an array
+        my_events = np.sort(np.array(events))
         # Select the relevant event from data
-        meas = self.get_events(events)[name]
-        # Get the wire_ids of the hit data
-        wire_ids = self.get_hit_vols(events, unique=False)
-        # Add the measurement to the correct cells in the result
-        if name == self.time_name:
-            result[wire_ids] += meas + np.ones(len(wire_ids))*self.time_offset
-        else:
-            result[wire_ids] += meas
+        meas = self.get_events(my_events)[name]
+        # Get the wire_ids and event_ids of the hit data
+        wire_ids = self.get_hit_vols(my_events, unique=False)
+        # Map the evnt_ids to the minimal continous set
+        evnt_ids = np.repeat(np.arange(my_events.size),
+                             self.event_to_n_hits[my_events])
+        # Get the default values
+        result = default*np.ones((my_events.size, self.geom.n_points),
+                                  dtype=float)
+        # Figure out the first place each wire id is mentioned in each event
+        two_d_ids = np.vstack([evnt_ids, wire_ids]).T
+        # Get the unique evt_id/wire_id values
+        one_d_view = np.ascontiguousarray(two_d_ids).view(
+            np.dtype((np.void, two_d_ids.dtype.itemsize * two_d_ids.shape[1])))
+        # Figure out where they appear
+        _, first_hits = np.unique(one_d_view, return_index=True)
+        # Map their appearances back in the correct order
+        evnt_ids, wire_ids = two_d_ids[np.sort(first_hits)].T
+        meas = meas[np.sort(first_hits)]
+        # Put the result on the correct wires
+        result[evnt_ids, wire_ids] = meas
+        if shift is not None:
+            result = result[:, self.geom.shift_wires(shift)]
+        if only_hits:
+            result = result[evnt_ids, wire_ids]
+        if flatten:
+            result = result.flatten()
+        if use_sparse:
+            return result.tocsr()
         return result
 
     def get_hit_types(self, events, unique=True):
@@ -799,7 +892,7 @@ class CyDetHits(GeomHits):
         nothing is 0.  If signal and background are both incident, signal takes
         priority
 
-        :return: numpy.array of shape [CyDet.n_points]
+        :return: numpy.array of shape [CDC.n_points]
         """
         result = np.zeros(self.geom.n_points, dtype=int)
         # Get the background hits
@@ -839,50 +932,71 @@ class CyDetHits(GeomHits):
         odd_hit_vector[odd_wires] = 1
         return even_hit_vector, odd_hit_vector
 
-### DEPRECIATED METHODS INCLUDED FOR BACKWARDS COMPATIBILITY ###
+    def min_layer_cut(self, min_layer):
+        """
+        Returns the EventNumbers of the events that pass the min_layer criterium
+        """
+        # Filter for max layer
+        evt_max = np.zeros(self.n_events)
+        for event in range(self.n_events):
+            evt_hits = self.get_measurement(self.flat_name,
+                                            events=event,
+                                            flatten=False,
+                                            only_hits=False).astype(int)
+            evt_max[event] = np.amax(self.geom.point_layers[evt_hits])
+        good_event_idx = np.where(evt_max >= min_layer)
+        # TODO these should not return key name, this is dangeous for hit
+        # merging
+        return np.unique(self.get_events(events=good_event_idx)[self.key_name])
 
-    def get_sig_wires(self, events):
+    def min_hits_cut(self, min_hits):
         """
-        Get all the signal wires in a given event.  This method is depreciated
-        and simply wraps get_sig_vols
+        Returns the EventNumbers of the events that pass the min_hits criterium
         """
-        return self.get_sig_vols(events)
+        # Filter for number of signal hits
+        good_events = np.where(self.event_to_n_hits >= min_hits)[0]
+        # TODO these should not return key name, this is dangeous for hit
+        # merging
+        return np.unique(self.get_events(events=good_events)[self.key_name])
 
-    def get_bkg_wires(self, events):
+    def get_occupancy(self):
         """
-        Get all the background wires in a given event.  This method is
-        depreciated and simply wraps get_bkg_vols
-        """
-        return self.get_bkg_vols(events)
+        Get the signal occupancy, background occupancy, and total occupancy of
+        all events
 
-    def get_hit_wires(self, events):
+        :return: np.array (3, self.n_events) as
+            (signal_occupauncy, background_occupancy, total_occupancy)
         """
-        Get all the hit wires in a given event.  This method is depreciated
-        and simply wraps get_hit_vols
-        """
-        return self.get_hit_vols(events)
+        occ = np.zeros((3, self.n_events))
+        for evt in range(self.n_events):
+            occ[0, evt] = len(self.get_sig_vols(evt))
+            occ[1, evt] = len(self.get_bkg_vols(evt))
+            occ[2, evt] = len(self.get_hit_vols(evt))
+
+        # print some information
+        avg_n_hits = np.average(self.event_to_n_hits)
+        sig_occ = np.average(occ[0, :])
+        back_occ = np.average(occ[1, :])
+        avg_occ = np.average(occ[2, :])
+        print("Sig Occ: {} , Back Occ : {}".format(sig_occ, back_occ))
+        print("All Occ: {}, {}".format(avg_occ, avg_occ/self.geom.n_points))
+        print("NumHits: {}".format(avg_n_hits))
+        print("MinMultiHit: {}".format((avg_n_hits - avg_occ)/float(avg_occ)))
+        return occ
 
 class CTHHits(GeomHits):
     # pylint: disable=too-many-instance-attributes
     # pylint: disable=bad-continuation
     # pylint: disable=relative-import
     def __init__(self,
-                 path="../data/signal.root",
-                 tree='tree',
-                 branches=None,
-                 prefix="M_",
-                 hit_type_name="HitType",
-                 key_name="EventNumber",
-                 use_evt_idx=True,
-                 row_name="volName",
-                 idx_name="volID",
-                 flat_name="vol_id",
-                 #TODO fix this default time name
-                 time_name="t",
-                 edep_name="Charge",
-                 signal_coding=1,
+                 path,
+                 tree='COMETEventsSummary',
+                 prefix="CTHHit.f",
+                 row_name="Channel",
+                 idx_name="Counter",
+                 time_name="MCPos.fE",
                  finalize_data=True,
-                 n_evts=-1):
+                 **kwargs):
         """
         This generates hit data in a structured array from an input root file
         from a file. It assumes the naming convention "M_"+ variable for
@@ -900,30 +1014,14 @@ class CTHHits(GeomHits):
         """
         GeomHits.__init__(self,
                           CTH(),
-                          path=path,
+                          path,
                           tree=tree,
-                          n_evts=n_evts,
-                          branches=branches,
                           prefix=prefix,
-                          hit_type_name=hit_type_name,
-                          key_name=key_name,
-                          use_evt_idx=use_evt_idx,
                           row_name=row_name,
                           idx_name=idx_name,
                           time_name=time_name,
-                          edep_name=edep_name,
-                          flat_name=flat_name,
-                          signal_coding=signal_coding,
-                          finalize_data=False)
-
-        # Add labels for upstream and downstream CTH setups
-        z_pos_column = self._get_geom_z_pos(path, tree)
-        self.data += [z_pos_column[0]]
-        self.z_pos_name = self.prefix + "position"
-        self.all_branches.append(self.z_pos_name)
-
-        # Initialize the up and down stream data holders
-        self.up_data, self.down_data = None, None
+                          finalize_data=False,
+                          **kwargs)
 
         if finalize_data:
             self._finalize_data()
@@ -933,14 +1031,10 @@ class CTHHits(GeomHits):
         Zip up the data into a rec array if this is the highest level class of
         this instance and sort by time
         """
-        self.data = np.rec.fromarrays(self.data, names=self.all_branches)
+        super(CTHHits, self)._finalize_data()
         # Remove passive volumes from the hit data
         # TODO fix passive volume hack
-        self.trim_hits(variable=self.flat_name, values=range(0, 64*2))
-        self.sort_hits(self.time_name)
-        # Shortcut the upstream and downstream sections
-        self.up_data = self.filter_hits(self.data, self.z_pos_name, 1)
-        self.down_data = self.filter_hits(self.data, self.z_pos_name, 0)
+        self.trim_hits(variable=self.flat_name, values=self.geom.fiducial_crys)
 
     def _get_geom_flat_ids(self, path, tree):
         """
@@ -948,43 +1042,23 @@ class CTHHits(GeomHits):
         row and volume index
         """
         # Import the data
-        row_data, idx_data = self._import_root_file(path, tree=tree,
-                                                    branches=[self.row_name,
-                                                              self.idx_name])
-        # Pull out the names of the volumes, removing the tag
-        for tag in ['U', 'D']:
-            row_data = np.char.rstrip(row_data.astype(str), tag)
+        chan_data = self._import_root_file(path, tree=tree,
+                                           branches=[self.row_name])[0]
+        idx_data = self._import_root_file(path, tree=tree,
+                                          branches=[self.idx_name])[0]
         # Map from volume names to row indexes
-        row_data = np.vectorize(self.geom.name_to_row.get)(row_data)
+        row_data = np.vectorize(self.geom.chan_to_row)(chan_data)
         # Flatten the volume names and IDs to flat_voldIDs
         flat_ids = np.zeros(self.n_hits)
-        for row, idx, hit in zip(row_data, idx_data, range(self.n_hits)):
+        for row, idx, hit in zip(row_data, idx_data, list(range(self.n_hits))):
             flat_ids[hit] = self.geom.point_lookup[row, idx]
         # Save this column and name it
         flat_id_column = flat_ids.astype(int)
         return flat_id_column
 
-    def _get_geom_z_pos(self, path, tree):
-        """
-        Labels each hit by if it a part of the upstream or downstream hodoscope
-        """
-        # Import the data
-        z_pos_data = self._import_root_file(path, tree=tree,
-                                            branches=[self.row_name])
-        # Strip the volume names to tag the data as upstream or downstream
-        z_pos_data = np.array(z_pos_data).astype(str)
-        # Start with the active ones
-        for vol in self.geom.active_names + self.geom.passive_names:
-            z_pos_data = np.char.lstrip(z_pos_data.astype(str), vol)
-        # Move to the passive ones
-        z_pos_data = np.vectorize(self.geom.pos_to_col.get)(z_pos_data)
-        return z_pos_data
-
-    def get_events(self, events=None, unique=True, hodoscope="both"):
+    def get_events(self, events=None, hodoscope="both"):
         """
         Returns the hits from the given event(s).  Default gets all events
-
-        :param unique: Force each event to only be retrieved once
         """
         assert hodoscope.startswith("both") or\
                hodoscope.startswith("up") or\
@@ -993,149 +1067,179 @@ class CTHHits(GeomHits):
                " upstream, or downstream"
         events = super(self.__class__, self).get_events(events)
         if hodoscope.startswith("up"):
-            events = self.filter_hits(events, self.z_pos_name, 1)
+            events = self.filter_hits(self.flat_name,
+                                      these_hits=events,
+                                      values=self.geom.up_crys)
         elif hodoscope.startswith("down"):
-            events = self.filter_hits(events, self.z_pos_name, 0)
+            events = self.filter_hits(self.flat_name,
+                                      these_hits=events,
+                                      values=self.geom.down_crys)
         return events
 
-class CDCHits(FlatHits):
+    def _find_trigger_signal(self, vol_types):
+        """
+        Returns the volumes that take part in the trigger pattern given an array
+        of volume types
+
+        :param vol_types: np.array of shape [self.geom.n_points] whose value is
+                          non-zero for a volume hit
+        :return trig_vols: np.array of shape [self.geom.n_points] whose value is
+                           1 for all volumes that form a trigger shape
+        """
+        # Get all volumes with pairs
+        hit_and_left = np.logical_and(vol_types,
+                                      vol_types[self.geom.shift_wires(1)])
+        hit_and_right = np.logical_and(vol_types,
+                                       vol_types[self.geom.shift_wires(-1)])
+        trig_crys = np.logical_or(hit_and_left, hit_and_right)
+        # Get volumes with crystals hit above or below
+        on_top = np.logical_and(trig_crys[self.geom.cher_crys],
+                                trig_crys[self.geom.scin_crys])
+        trig_crys[self.geom.cher_crys] = on_top
+        trig_crys[self.geom.scin_crys] = on_top
+        # Include the crystals to the left and right of these volumes
+        trig_crys = np.logical_or.reduce((trig_crys,
+                                          trig_crys[self.geom.shift_wires(1)],
+                                          trig_crys[self.geom.shift_wires(-1)]))
+        # Return the volumes that pass and have hits
+        return np.logical_and(vol_types, trig_crys)
+
+
+    def set_trigger_time(self):
+        # Sort by time first
+        self.sort_hits(self.time_name)
+        # Reset the trigger timing
+        self.data[self.trig_name] = 0
+        for event in range(self.n_events):
+            # Get the volumes with hits for these events
+            vol_types = self.get_vol_types(event)
+            trig_vols = np.nonzero(self._find_trigger_signal(vol_types))[0]
+            # Skip the event if there is no trigger
+            if len(trig_vols) == 0:
+                continue
+            # Find the hit indexes of all the volumes that have hits
+            trig_hits = self.filter_hits(self.flat_name,
+                                         these_hits=self.get_events(event),
+                                         values=trig_vols)[self.hits_index_name]
+            # Get the indexes where these volumes first appear in the
+            # (event,time) sorted data
+            _, uniq_idxs = np.unique(self.data[self.flat_name][trig_hits],
+                                     return_index=True)
+            # Get as close to the fourth hit as possible, but not less
+            uniq_idxs = uniq_idxs[uniq_idxs > 2]
+            try:
+                fourth_uniq_hit = uniq_idxs[(np.abs(uniq_idxs-3)).argmin()]
+                fourth_vol_hit = trig_hits[fourth_uniq_hit]
+            except:
+                print("Error in trigger logic!!\n"+\
+                      "Trig vols : {}\n".format(trig_vols)+\
+                      "Uniq idx : {}\n".format(uniq_idxs)+\
+                      "Event : {}".format(event))
+            self.data[self.trig_name][trig_hits] = \
+                    self.data[self.time_name][fourth_vol_hit]
+
+# TODO move these into get measurement
+
+    def get_trig_hits(self, events=None):
+        """
+        Return the trigger hit hit_index in the given event
+        """
+        # Find the hit indexes of all the volumes that have hits
+        return self.filter_hits(self.trig_name,
+                                these_hits=self.get_events(events),
+                                values=0,
+                                invert=True)[self.hits_index_name]
+
+    def get_trig_evts(self, events=None):
+        """
+        Return the trigger events by EventNumber
+        """
+        # Find the hit indexes of all the volumes that have hits
+        # TODO have this not return keyname, this is dangerous for hit merging
+        return np.unique(self.data[self.get_trig_hits(events)][self.key_name])
+
+    def get_trig_vector(self, events):
+        """
+        Return the shape [events, self.geom.n_points], where 1 is a triggered
+        volume
+        """
+        # Allow for a single event
+        if isinstance(events, int):
+            events = [events]
+        # Find the hit indexes of all the volumes that have hits
+        trig_vector = np.zeros((len(events), self.geom.n_points))
+        for index, evt in enumerate(events):
+            trig_vols = self.data[self.flat_name][self.get_trig_hits(evt)]
+            trig_vols = np.unique(trig_vols)
+            trig_vector[index, trig_vols] = 1
+        return trig_vector[:, self.geom.fiducial_crys]
+
+class CyDetHits(FlatHits):
     # pylint: disable=too-many-instance-attributes
     # pylint: disable=bad-continuation
     # pylint: disable=relative-import
     def __init__(self,
-                 cydet_hits,
-                 cth_hits):
+                 cdc_hits,
+                 cth_hits,
+                 common_events=False):
         """
         A class to support overlaying hit classes of the same type.  This will
         returned the combined event from each of the underlying hit classes.
-
         """
         # TODO assertion here
         self.cth = cth_hits
-        self.cydet = cydet_hits
-        self.n_events = min(self.cydet.n_events, self.cth.n_events)
+        self.cdc = cdc_hits
+        if common_events:
+            self.keep_common_events()
+        self.n_events = min(self.cdc.n_events, self.cth.n_events)
+
+    def keep_common_events(self):
+        """
+        Trim all events by event index so that they have the same events
+        """
+        shared_evts = np.intersect1d(self.cdc.get_events()[self.cdc.key_name],
+                                     self.cth.get_events()[self.cth.key_name])
+        self.trim_events(shared_evts)
+
+    def set_trigger_time(self):
+        """
+        Set the CTH trigger time for both the CTH and for all CDC hits
+        """
+        # Set the CTH trigger time
+        self.cth.set_trigger_time()
+        # Broadcase this value to all CDC hits in the event
+        for event in range(self.cth.n_events):
+            # Get all the trigger times in  this event
+            all_trig = np.unique(self.cth.get_events(event)[self.cth.trig_name])
+            # Remove the zero values
+            evt_trig = np.trim_zeros(all_trig)
+            # Broadcast this value to all CDC hits in this event
+            self.cdc.data[self.cdc.trig_name][self.cdc.event_to_hits[event]] = \
+                evt_trig
 
     def print_branches(self):
         """
         Print the names of the data available once you are done
         """
         # Print status message
-        print "CTH Branches:"
+        print("CTH Branches:")
         self.cth.print_branches()
-        print "CyDet Branches:"
-        self.cydet.print_branches()
+        print("CDC Branches:")
+        self.cdc.print_branches()
 
     def trim_events(self, events):
         """
-        Remove these events from the data
+        Keep these events in the data
         """
-        self.cydet.trim_events(events)
+        self.cdc.trim_events(events)
         self.cth.trim_events(events)
-        self.n_events = self.cydet.n_events
+        self.n_events = self.cdc.n_events
 
-    def apply_timing_cut(self, cth_lower=700, cth_upper=110,
-                               cydet_lower=700, cydet_upper=1620):
+    def apply_timing_cut(self, lower=700, upper=1170, drift=450):
         """
         Remove the hits that do not pass timing cut
         """
         self.cth.trim_hits(variable=self.cth.time_name,\
-                           less_than=1100, greater_than=700)
-        self.cydet.trim_hits(variable=self.cydet.time_name,\
-                           less_than=1620, greater_than=700)
-
-    def apply_cth_trigger(self):
-        """
-        Remove events that do not hit the CTH trigger
-        """
-        trigger_events = []
-        for evt in range(self.n_events):
-            sig_hits = self.cth.get_signal_hits(evt)
-            if len(sig_hits) != 0:
-                trigger_events.append(evt)
-        trigger_events = np.array(trigger_events)
-        self.trim_events(trigger_events)
-
-    def apply_n_hits_cut(self, n_hits=30):
-        """
-        Remove events that do not have enough CyDet hits
-        """
-        n_signal_hits = np.array([len(self.cydet.get_signal_hits(evt))
-                                 for evt in range(self.cydet.n_events)])
-        n_signal_hits = np.array(n_signal_hits)
-        good_n_hits = np.where(n_signal_hits >= n_hits)[0]
-        self.trim_events(good_n_hits)
-
-    def apply_max_layer_cut(self, ideal_layer=5):
-        """
-        Remove events that do not have enough CyDet hits
-        """
-        max_layer = []
-        for evt in range(self.n_events):
-            sig_wires = self.cydet.get_sig_wires(evt)
-            these_layers = self.cydet.geom.point_layers[sig_wires]
-            if len(sig_wires) != 0:
-                max_layer.append(np.max(these_layers))
-            else:
-                max_layer.append(-1)
-        max_layer = np.array(max_layer)
-        good_max_layer = np.where(max_layer >= ideal_layer)[0]
-        self.trim_events(good_max_layer)
-
-class HitsMerger(CyDetHits):
-    # pylint: disable=too-many-instance-attributes
-    # pylint: disable=bad-continuation
-    # pylint: disable=relative-import
-    def __init__(self,
-                 sig_class,
-                 path,
-                 tree,
-                 this_class="cydet",
-                 force_time_accept=True):
-        """
-        A class to support overlaying hit classes of the same type.  This will
-        returned the combined event from each of the underlying hit classes.
-
-        """
-        CyDetHits.__init__(self,
-                           path=path,
-                           tree=tree)
-
-
-        # Ensure they are the same type of hits class
-#        assert isinstance(sig_class, bck_class.__class__),\
-#               "The two merged hits must be the same class\n"+\
-#               "First Class : {}\n".format(sig_class)+\
-#               "Second Class : {}\n".format(bck_class)
-#        # Ensure they have the same geometry setup
-#        assert sig_class.geom == bck_class.geom,\
-#               "The two merged hits must have the same geometry"
-        # Remember which one is which
-        self.sig_class = sig_class
-        self.this_class = this_class
-
-        self.summed_properties = [sig_class.edep_name]
-        self.minned_properties = [sig_class.time_name]
-        self.early_properties = [sig_class.hit_type_name]
-
-        # Force signal tracks to be in time acceptance window
-  #      if force_time_accept:
-  #          for evt in range(self.sig_class.n_events):
-  #              sig_time = self.sig_class.get_hit_time(evt)
-  #              self.sig_class.data[self.sig_class.time_name]
-
-    def get_measurement(self, event, name):
-        sig_measure = self.sig_class.get_measurement(event, name)
-        bkg_measure = super(CyDetHits, self).get_measurement(event, name)
-        if self.this_class=="cth":
-            return np.append(bkg_measure, sig_measure)
-        if self.this_class=="cydet":
-            if name in self.summed_properties:
-                return sig_measure + bkg_measure
-            if name in self.minned_properties:
-                return np.amin(sig_measure, bkg_measure)
-            if name in self.early_properties:
-                sig_time = sig_class.get_hit_time(event)
-                bkg_time = super(HitsMerger,self).get_hit_time(event)
-                sig_mask = np.less(sig, bkg)
-                bkg_mask = np.logical_not(mask)
-                return sig_measure[sig_mask] + bkg_measure[bkg_mask]
+                           greater_than=lower, less_than=upper)
+        self.cdc.trim_hits(variable=self.cdc.time_name,\
+                           greater_than=lower, less_than=upper+drift)

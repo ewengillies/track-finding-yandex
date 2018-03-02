@@ -20,22 +20,22 @@ class HoughSpace(object):
     # pylint: disable=no-name-in-module
     def __init__(self, geom, sig_rho=33.6, sig_rho_max=35.,
                  sig_rho_min=24, sig_rho_sgma=3., trgt_rho=20., rho_bins=20,
-                 arc_bins=20):
+                 arc_bins=20, split=True):
         """
         This class represents a Hough transform method. It initiates from a data
         file, and over lays a track center geometry on this.  It also defines a
         signal track radius. The track center geometry is defined so that only
-        track centers that yield signal tracks that pass through the CyDet and
+        track centers that yield signal tracks that pass through the CDC and
         the target are considered. The signal radius and target radius are
         defined by default to produce tracks whose maximal rho value can lie
         anywhere between the first and the last layer.
 
         This class calculates the probability that a given hit point in the
-        CyDet belongs to a track centered at a given point in the TrackCenters
+        CDC belongs to a track centered at a given point in the TrackCenters
         geometry.  This probability peaks at the distance sig_rho, and decays
         with decay width sig_rho_sgma.  The probability is only defined for
-        CyDet wires that are within sig_rho_smear of the signal track distance
-        from the given center.  This means for track center trck_id and CyDet
+        CDC wires that are within sig_rho_smear of the signal track distance
+        from the given center.  This means for track center trck_id and CDC
         wire_id, wires that satisfy
 
         distance(trck_id, wire_id) - sig_rho > sig_rho_smear
@@ -61,16 +61,17 @@ class HoughSpace(object):
         self.trgt_rho = trgt_rho
 
         # Set the geometry of the TrackCenters to cover regions where the signal
-        # track passes through the target and the CyDet volume.  Specifically,
+        # track passes through the target and the CDC volume.  Specifically,
         # enforce that the track's outer most hits may lie in the first or last
         # layer.
-        r_max = self.geom.r_by_layer[-1] - self.sig_rho_max
+        r_max = np.amax(self.geom.point_rhos) - self.sig_rho_max
         r_min = max(self.sig_rho_max - self.trgt_rho,
-                    self.geom.r_by_layer[0] - self.sig_rho_max)
-        self.track = TrackCenters(arc_bins=arc_bins, rho_bins=rho_bins, r_min=r_min, r_max=r_max)
+                    np.amin(self.geom.point_rhos) - self.sig_rho_max)
+        self.track = TrackCenters(arc_bins=arc_bins, rho_bins=rho_bins, 
+                                  r_min=r_min, r_max=r_max)
 
         self.track_wire_dists = self._prepare_track_distances()
-        self.correspondence = self._prepare_wire_track_corresp()
+        self.correspondence = self._prepare_wire_track_corresp(split)
         self.norm_track_neighs = self._prepare_track_nns()
 
     def _prepare_track_distances(self):
@@ -99,7 +100,7 @@ class HoughSpace(object):
         if distance >= 0:
             return 1.05 - distance/(self.sig_rho_max - self.sig_rho + 0.1)
 
-    def _prepare_wire_track_corresp(self):
+    def _prepare_wire_track_corresp(self, split=True):
         """
         Defines the probability that a given wire belongs to a track centered at
         a given track center bin.  Produces two appended sparce matricies, one
@@ -110,7 +111,7 @@ class HoughSpace(object):
         corsp = lil_matrix((self.geom.n_points, self.track.n_points))
         # Loop over all track centers
         for trck in range(self.track.n_points):
-            # Loop over all wires in CyDet
+            # Loop over all wires in CDC
             for wire in range(self.geom.n_points):
                 # Calculate how far the wire is from the signal track centered
                 # at the current track center
@@ -119,6 +120,8 @@ class HoughSpace(object):
                 if (this_dist <= self.sig_rho_max) and  \
                    (this_dist >= self.sig_rho_min):
                     corsp[wire, trck] = self.dist_prob(this_dist)
+        if not split:
+            return corsp
         # Define even and odd layer wires
         even_wires = self.geom.point_pol != 1
         odd_wires = self.geom.point_pol == 1
@@ -271,7 +274,7 @@ class HoughTransformer(object):
         self.image_mean = hough_images.mean()
         return self
 
-    def transform(self, trans_wires):
+    def transform(self, trans_wires, only_hits=True, flatten=True):
         """
         Transform the data according to the fit
 
@@ -281,6 +284,10 @@ class HoughTransformer(object):
         """
         # Center the input distribution around 0
         original = trans_wires - self.wire_mean
+        # Record the wires with hits if need be
+        # TODO clean this up, i.e. check it always works etc
+        if only_hits:
+            hit_wires = np.nonzero(trans_wires)
         # Perform the hough transform
         hough_images = self.normed_corresp.T.dot(original.T).T
         # Remove the bottom min_percentile shift the remaining range to [0-1]
@@ -294,6 +301,10 @@ class HoughTransformer(object):
         hough_images -= self.image_mean
         # Inverse hough transform
         after_hough = self.normed_corresp.dot(hough_images.T).T
+        if only_hits:
+            after_hough = after_hough[hit_wires]
+        if flatten:
+            after_hough = after_hough.flatten()
         return after_hough, hough_images
 
 class HoughShifter(object):
@@ -366,7 +377,7 @@ class HoughShifter(object):
     def _shift_wire_ids(self, wire_shift):
         """
         Shift each wire ID by the amount of wire centres given.  Note that this
-        calls the cydet.shift_wire function, so wires locations themselves are
+        calls the CDC.shift_wire function, so wires locations themselves are
         unchanged, but each wire ID is mapped to a new wire location.
 
         :param wire_shift:  The amount each wire is shifted, where positive
@@ -439,7 +450,7 @@ class HoughShifter(object):
                              units of dphi
         """
         # Find the ideal shift in phi to align images in hough space
-        diff = sys.maxint
+        diff = sys.maxsize
         # Try shifting the integrated contributions by each of the allowed dphis
         for phi_shift in range(self.lower_lim, self.upper_lim+1):
             # Shift the integral of contributions over by a given dphi
