@@ -32,11 +32,10 @@ environment, i.e. one with many many particles flying around in the detector.
 COMET is designed to transform a high intensity proton beam (read: many protons 
 per second) into the ideal environment to watch for our signal process.  To do 
 so, it employs a clever collection of magnets, targets, and filters to create 
-a high intensity muon beam.  
+a high intensity muon beam.  These components form the "beamline" of the 
+experiment.
 
-
-
-The beamline for COMET refers to the 
+![phase-i-schem](https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/images/PhaseI_schematic_no_back.png)
 
 
 Before these events are written to disk, the experiment is designed to filter 
