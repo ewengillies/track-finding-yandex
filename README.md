@@ -59,15 +59,29 @@ Phase-I.
 Inside the detector region, the muon beam is collides with a number of thin, 
 fixed aluminum disks. Some of the muons lose enough momentum to stop inside the 
 target. Once they do, they form muonic atoms, where a muon replaces an electron 
-inside an aluminium atom in the target. **This is the condition needed to 
-observe the signal process.** Below, we can see the muons in green colliding 
-the with silver stopping target disks.  The disks are surrounded by the 
-detector.
+inside an aluminium atom in the target. **This is the condition needed from 
+which the signal process can occur.** This condition happens millions of times 
+per second, and for the vast majority of the time, we expect non-signal things 
+to happen.  Below, we can see the muons in green colliding the with silver 
+stopping target disks.  The disks are surrounded by the detector.
 
 <p align="center">
     <img src="https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/particles_on_aluminum.png" width="500">
 </p>
 
+The signal process would yield an electron with much higher energy than the
+background processes. To spot the signal, we need to spot this electron. Both
+the detector and the stopping target are surrounded by a large magnet, 
+which causes particle trajectories to curve and fly in a helix shape.  The 
+radius of the curve of the helix is larger for a particle with a high momentum
+(or energy).
+
+With enough momentum, a particle enters the detector, which is the cylindrical 
+volume.  This cylindircal volume 
+
+### Problem Statement
+
+The tracking algorithm
 
 Before these events are written to disk, the experiment is designed to filter 
 out interactions that are clearly uninteresting, while saving the ones that look 
