@@ -12,7 +12,7 @@ searching for muon to electron conversion on an aluminium nucleus.  This process
 is not allowed in the Standard Model of particle physics, but has very good 
 sensitivity to Beyond the Standard Model physics. 
 
-![phase-i](https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/phase_i_no_background.png)
+![phase-i](https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/phase_i_no_background.png | width=300)
 
 ### The Search for New Physics
 
@@ -35,7 +35,7 @@ so, it employs a clever collection of magnets, targets, and filters to create
 a high intensity muon beam.  These components form the "beamline" of the 
 experiment.
 
-![phase-i-schem](https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/PhaseI_schematic_no_back.png)
+![phase-i-schem](https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/PhaseI_schematic_no_back.png | width=300)
 
 
 Before these events are written to disk, the experiment is designed to filter 
