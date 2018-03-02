@@ -133,7 +133,7 @@ Lets illustrate the rest of the algorithm by way of an example.  First, lets
 start with our unfiltered event:
 
 <p align="center">
-    <img src="https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/unlabeled_event.png" width="500"/> <img src="https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/labelled_event.png" width="500"/>
+    <img src="https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/unlabeled_event.png" width="300"/> <img src="https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/labelled_event.png" width="300"/>
 </p>
 
 <!---
