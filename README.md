@@ -124,8 +124,10 @@ from these features, the properties of neighbouring hits are also considered.
 For each hit, this add four more features: 
  * The energy deposition on the wires to the left and right, if any
  * The timing of the hit on the wires to the left and right, if any.
-These four features, combined with the original three local features, define 
-a total set of 7 features, which I will refer to as the "neighbour feature" set.
+The classification power of these features come from the fact that signal-like 
+hits are often flanked by other signal-like hits. These four features, combined 
+with the original three local features, define a total set of 7 features, which 
+I will refer to as the "neighbour feature" set.
 
 ### Classifying an Event
 
@@ -144,6 +146,20 @@ background:
 <p align="center">
     <img src="https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/labelled_event.png" width="500"/>
 </p>
+
+The signal points are surrounded by background points.  The first stage of 
+classification is now used to improve the situation.  To this end, a GBDT is 
+trained over the 7 neighbour features.  Each hit is classified, where a score of 
+1 corresponds to a signal-like hit.  The fill of each hit is then scaled to this 
+score, such that outlines with no fill mean a background-like response, whereas 
+full circles indicate a signal like response:
+
+<p align="center">
+    <img src="https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/neighbour_class_event.png" width="500"/>
+</p>
+
+We can see in this event, this vastly improves our ability to spot the signal 
+hits.  
 
 <!---
 Before these events are written to disk, the experiment is designed to filter 
