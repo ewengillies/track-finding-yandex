@@ -94,7 +94,7 @@ a signal track, blue, leaving the aluminium target in the middle, entering the
 cylindrical detector, and leaving hits on the wires it passes. 
 
 <p align="center">
-    <img src="https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/particles_on_aluminum.png" width="500">
+    <img src="https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/paricle_through_detector.png" width="500">
 </p>
 
 
