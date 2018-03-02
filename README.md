@@ -51,7 +51,23 @@ These pions are unstable particles, and naturally decay into muons while they
 are flying through the curved section.  The curved section is also a collection 
 of magnets, which are designed to filter away and undesirable particles.  This 
 delivers a muon beam to the detector region, at the bottom left end of the 
-diagram above.  The bottom right wh
+diagram above.  The bottom right shows two of the detector systems in use for 
+Phase-I.
+
+### The Cylindrical Detector
+
+Inside the detector region, the muon beam is collides with a number of thin, 
+fixed aluminum disks. Some of the muons lose enough momentum to stop inside the 
+target. Once they do, they form muonic atoms, where a muon replaces an electron 
+inside an aluminium atom in the target. **This is the condition needed to 
+observe the signal process.** Below, we can see the muons in green colliding 
+the with silver stopping target disks.  The disks are surrounded by the 
+detector.
+
+<p align="center">
+    <img src="https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/particles_on_aluminum.png" width="500">
+</p>
+
 
 Before these events are written to disk, the experiment is designed to filter 
 out interactions that are clearly uninteresting, while saving the ones that look 
