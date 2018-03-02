@@ -87,6 +87,10 @@ the wire, which is then readout and saved to a file.  These are referred to as
 
 ## Track Finding as a Classification Problem
 
+This section describes the algorithm constructed in 
+[this jupyter notebook](https://github.com/ewengillies/track-finding-yandex/blob/update_readme/notebooks/TrackFindingBDT.ipynb).
+Please see the notebook for more plots and for the code itself.
+
 The track finding algorithm must group signal hits in a given event so that the 
 track fitting algorithm can fit a trajectory to the hits. As a first step, the 
 proposed algorithm filters out all background hits. The image below shows 
