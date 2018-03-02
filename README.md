@@ -130,10 +130,19 @@ a total set of 7 features, which I will refer to as the "neighbour feature" set.
 ### Classifying an Event
 
 Lets illustrate the rest of the algorithm by way of an example.  First, lets 
-start with our unfiltered event:
+start with our unfiltered, unlabelled event:
 
 <p align="center">
-    <img src="https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/unlabeled_event.png" width="300"/> <img src="https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/labelled_event.png" width="300"/>
+    <img src="https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/unlabeled_event.png" width="500"/>
+</p>
+
+Needless to say, its not at all obvious to the naked eye if this event contains 
+a signal track, and which of these points form a signal track shape.  Lets add 
+some labels to make it more obvious, where as before, blue is signal, red is 
+background:
+
+<p align="center">
+    <img src="https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/labelled_event.png" width="500"/>
 </p>
 
 <!---
