@@ -45,11 +45,13 @@ The red arrow in the figure above represents the direction of the incoming
 proton beam.  These protons hit a fixed target and interact with the target 
 material to produce pions.  This target is surrounded by a large magnet, whose 
 magnetic field is designed to direct the pions towards the curved part of the 
-diagram above.  These pions are unstable particles, and naturally decay into 
-muons while they are flying through the curved section.  The curved section is 
-also a collection of magnets, which are designed to filter away and undesirable 
-particles.  This delivers a muon beam to the detector region, at the bottom left 
-end of the diagram above.  The bottom right wh
+diagram above.
+
+These pions are unstable particles, and naturally decay into muons while they 
+are flying through the curved section.  The curved section is also a collection 
+of magnets, which are designed to filter away and undesirable particles.  This 
+delivers a muon beam to the detector region, at the bottom left end of the 
+diagram above.  The bottom right wh
 
 Before these events are written to disk, the experiment is designed to filter 
 out interactions that are clearly uninteresting, while saving the ones that look 
