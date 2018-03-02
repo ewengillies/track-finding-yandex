@@ -12,6 +12,8 @@ searching for muon to electron conversion on an aluminium nucleus.  This process
 is not allowed in the Standard Model of particle physics, but has very good 
 sensitivity to Beyond the Standard Model physics. 
 
+![phase-i](https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/phase_i_no_background.png)
+
 ### The Search for New Physics
 
 COMET will take place in two phases. The first phase is designed to probe muon 
@@ -21,11 +23,18 @@ scale to this search, we could reach a similar sensitivity if we looked at one
 event per minute since the beginning of the universe (13.8 billion years ago).
 
 Unfortunately, we do not have 13.8 billion years for our search.  To combat 
-this, the COMET experiment is designed to probe millions of events per second for 
-our elusive signal of new physics.  This leads to a *high intenisty* 
+this, the COMET experiment is designed to probe millions of events per second 
+for our elusive signal of new physics.  This leads to a *high intenisty* 
 environment, i.e. one with many many particles flying around in the detector.
 
 ### The COMET Phase-I Beamline
+
+COMET is designed to transform a high intensity proton beam (read: many protons 
+per second) into the ideal environment to watch for our signal process.  To do 
+so, it employs a clever collection of magnets, targets, and filters to create 
+a high intensity muon beam.  
+
+
 
 The beamline for COMET refers to the 
 
