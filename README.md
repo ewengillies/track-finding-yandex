@@ -35,8 +35,9 @@ so, it employs a clever collection of magnets, targets, and filters to create
 a high intensity muon beam.  These components form the "beamline" of the 
 experiment.
 
-<img src="https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/PhaseI_schematic_no_back.png" width="500">
-
+<p align="center">
+    <img src="https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/PhaseI_schematic_no_back.png" width="500">
+</p>
 
 Before these events are written to disk, the experiment is designed to filter 
 out interactions that are clearly uninteresting, while saving the ones that look 
