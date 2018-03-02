@@ -192,6 +192,19 @@ then to invert the mapping.  Graphically, this looks like:
     <img src="https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/inverse_hough_transform_event.png" width="500"/>
 </p>
 
+With each track centre now voting on its favourite hit points, each hit point 
+can be assigned a score that describes "how likely the hit point is to be 
+a signal-track radius away from the most likely track centres."  This defines 
+our 8th feature.  Combined with the 7 neighbour features, our new feature set is 
+called the "track feature" set.  The algorithm now trains a new GBDT over these 
+8 features.  As before, we can visualize the output of this classifier on the 
+sample event:
+
+<p align="center">
+    <img src="https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/classified_event.png" width="500"/>
+</p>
+
+
 <!---
 Before these events are written to disk, the experiment is designed to filter 
 out interactions that are clearly uninteresting, while saving the ones that look 
