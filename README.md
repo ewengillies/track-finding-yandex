@@ -97,30 +97,6 @@ cylindrical detector, and leaving hits on the wires it passes.
     <img src="https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/particles_on_aluminum.png" width="500">
 </p>
 
-### The Search for New Physics
-
-COMET will take place in two phases. The first phase is designed to probe muon 
-to electron conversion 100 times better than the current limit. This target 
-limit will look for  a single event in 10<sup>15</sup> events.  To give some 
-scale to this search, we could reach a similar sensitivity if we looked at one 
-event per minute since the beginning of the universe (13.8 billion years ago).
-
-Unfortunately, we do not have 13.8 billion years for our search.  To combat 
-this, the COMET experiment is designed to probe millions of events per second 
-for our elusive signal of new physics.  This leads to a *high intenisty* 
-environment, i.e. one with many many particles flying around in the detector.
-
-### The COMET Phase-I Beamline
-
-COMET is designed to transform a high intensity proton beam (read: many protons 
-per second) into the ideal environment to watch for our signal process.  To do 
-so, it employs a clever collection of magnets, targets, and filters to create 
-a high intensity muon beam.  These components form the "beamline" of the 
-
-To do so, we use 
-a mulit-step classification algorithm.  In its current iteration, it uses 
-Gradient Boosted Decision Trees (GBDTs) as the primary classifiers, but other 
-classification algorit
 
 Before these events are written to disk, the experiment is designed to filter 
 out interactions that are clearly uninteresting, while saving the ones that look 
