@@ -2,7 +2,10 @@
 
 This is my personal repository of my work on COMET tracking using various 
 machine learning approaches.  This work was carried out with Alex Rogozhnikov at 
-Yandex Data Factory.
+Yandex Data Factory.  The simulation data was produced using the ICEDUST 
+software framework. I orchestrated the simulations themselves across various 
+batch computing farms, namely the ones at CC-IN2P3, Imperial College London, 
+IHEP, and Tianhe-2.
 
 ## The COMET Experiment
 
@@ -77,11 +80,47 @@ radius of the curve of the helix is larger for a particle with a high momentum
 (or energy).
 
 With enough momentum, a particle enters the detector, which is the cylindrical 
-volume.  This cylindircal volume 
+volume.  This cylindrical volume contains an array of coaxial wires. As the 
+particles pass these wires, they deposit a small amount of electric charge on 
+the wire, which is then readout and saved to a file.  These are referred to as 
+*hits* on the wire.
 
-### Problem Statement
+## Track Finding as a Classification Problem
 
-The tracking algorithm
+The track finding algorithm must group signal hits in a given event so that the 
+track fitting algorithm can fit a trajectory to the hits. As a first step, the 
+proposed algorithm filters out all background hits. The image below shows 
+a signal track, blue, leaving the aluminium target in the middle, entering the 
+cylindrical detector, and leaving hits on the wires it passes. 
+
+<p align="center">
+    <img src="https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/particles_on_aluminum.png" width="500">
+</p>
+
+### The Search for New Physics
+
+COMET will take place in two phases. The first phase is designed to probe muon 
+to electron conversion 100 times better than the current limit. This target 
+limit will look for  a single event in 10<sup>15</sup> events.  To give some 
+scale to this search, we could reach a similar sensitivity if we looked at one 
+event per minute since the beginning of the universe (13.8 billion years ago).
+
+Unfortunately, we do not have 13.8 billion years for our search.  To combat 
+this, the COMET experiment is designed to probe millions of events per second 
+for our elusive signal of new physics.  This leads to a *high intenisty* 
+environment, i.e. one with many many particles flying around in the detector.
+
+### The COMET Phase-I Beamline
+
+COMET is designed to transform a high intensity proton beam (read: many protons 
+per second) into the ideal environment to watch for our signal process.  To do 
+so, it employs a clever collection of magnets, targets, and filters to create 
+a high intensity muon beam.  These components form the "beamline" of the 
+
+To do so, we use 
+a mulit-step classification algorithm.  In its current iteration, it uses 
+Gradient Boosted Decision Trees (GBDTs) as the primary classifiers, but other 
+classification algorit
 
 Before these events are written to disk, the experiment is designed to filter 
 out interactions that are clearly uninteresting, while saving the ones that look 
