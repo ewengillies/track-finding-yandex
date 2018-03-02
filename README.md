@@ -12,15 +12,21 @@ searching for muon to electron conversion on an aluminium nucleus.  This process
 is not allowed in the Standard Model of particle physics, but has very good 
 sensitivity to Beyond the Standard Model physics. 
 
-COMET will take place in two phases. The first phase is designed to probe this 
-process 100 times better than the current limit. This target limit will look for 
-a single event in 10<sup>15</sup> events.
+### The Search for New Physics
 
+COMET will take place in two phases. The first phase is designed to probe muon 
+to electron conversion 100 times better than the current limit. This target 
+limit will look for  a single event in 10<sup>15</sup> events.  To give some 
+scale to this search, we could reach a similar sensitivity if we looked at one 
+event per minute since the beginning of the universe (13.8 billion years ago).
 
-To reach its target 
-sensitivity, COMET is designed to generate a million events per second, some of 
-which will yield muon interactions, fewer of which will be relevant to muon to 
-electron conversion.  
+Unfortunately, we do not have 13.8 billion years for our search.  To combat 
+this, the COMET experiment is designed to probe a million events per second for 
+our elusive signal of new physics.  This leads to a *high intenisty* 
+environment, i.e. one with many many particles flying around in the detector.
+
+### The COMET Beamline
+
 
 Before these events are written to disk, the experiment is designed to filter 
 out interactions that are clearly uninteresting, while saving the ones that look 
