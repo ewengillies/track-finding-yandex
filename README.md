@@ -12,7 +12,10 @@ searching for muon to electron conversion on an aluminium nucleus.  This process
 is not allowed in the Standard Model of particle physics, but has very good 
 sensitivity to Beyond the Standard Model physics. 
 
-![phase-i](https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/phase_i_no_background.png | width=300)
+![phase-i]( | width=300)
+<p align="center">
+    <img src="https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/phase_i_no_background.png" width="500">
+</p>
 
 ### The Search for New Physics
 
