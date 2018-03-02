@@ -14,7 +14,7 @@ sensitivity to Beyond the Standard Model physics.
 
 COMET will take place in two phases. The first phase is designed to probe this 
 process 100 times better than the current limit. This target limit will look for 
-a single event in 10^15 events
+a single event in 10<sup>15</sup> events.
 
 
 To reach its target 
