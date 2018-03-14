@@ -21,12 +21,13 @@ def make_random_time(signal_file, smear):
         rand_t[event] = np.random.uniform(-smear, smear)
     return rand_t
 
-def import_cth_sample(cth_file, rand_t, min_t=500, max_t=1170):
+def import_cth_sample(cth_file, rand_t=None, min_t=500, max_t=1170):
     # Import the hits
     cth_samp = CTHHits(cth_file, tree="CTHHitTree")
-    # Smear the CTH time
-    cth_samp.data[cth_samp.time_name] += \
-            np.vectorize(rand_t.get)(cth_samp.get_events()[cth_samp.key_name])
+    # Smear the times if the dictionary is in use
+    if rand_t is not None:
+        cth_samp.data[cth_samp.time_name] += \
+                np.vectorize(rand_t.get)(cth_samp.get_events()[cth_samp.key_name])
     # Remove the hits outside the time window
     cth_samp.trim_hits(variable=cth_samp.time_name,
                        greater_than=min_t,
@@ -35,14 +36,15 @@ def import_cth_sample(cth_file, rand_t, min_t=500, max_t=1170):
     cth_samp.set_trigger_time()
     return np.unique(cth_samp.data[cth_samp.get_trig_hits()][cth_samp.key_name])
 
-def import_cdc_sample(cdc_file, rand_t, min_t=500, max_t=1620,
+def import_cdc_sample(cdc_file, rand_t=None, min_t=500, max_t=1620,
                       min_hits=30, min_layer=4):
     # Import the hits
     cdc_samp = CDCHits(cdc_file, tree="CDCHitTree",
                        selection="CDCHit.fIsSig == 1")
-    # Smear the CDC time
-    cdc_samp.data[cdc_samp.time_name] += \
-            np.vectorize(rand_t.get)(cdc_samp.get_events()[cdc_samp.key_name])
+    # Smear the times if the dictionary is in use
+    if rand_t is not None:
+        cdc_samp.data[cdc_samp.time_name] += \
+                np.vectorize(rand_t.get)(cdc_samp.get_events()[cdc_samp.key_name])
     cdc_samp.trim_hits(variable=cdc_samp.time_name,
                        greater_than=min_t,
                        less_than=max_t)
@@ -51,14 +53,17 @@ def import_cdc_sample(cdc_file, rand_t, min_t=500, max_t=1620,
     enough_layer = cdc_samp.min_layer_cut(min_layer)
     return np.intersect1d(enough_hits, enough_layer)
 
-
-class ExtraBranches(TreeModel):
-    GoodTrack = BoolCol()
-    GoodTrig = BoolCol()
+class Smeared(TreeModel):
     SmearTime = FloatCol()
 
-def copy_in_trigger_signal(in_files_name, out_name, tree_name,
-                           prefix, cdc_events, cth_events, rand_t):
+class Tagged(TreeModel):
+    GoodTrack = BoolCol()
+    GoodTrig = BoolCol()
+
+def copy_in_trigger_signal(in_files_name, out_name, 
+                           tree_name, prefix, 
+                           cdc_events, cth_events, 
+                           rand_t=None):
     # Convert input lists to sets first
     set_cdc_events = set(cdc_events)
     set_cth_events = set(cth_events)
@@ -67,6 +72,13 @@ def copy_in_trigger_signal(in_files_name, out_name, tree_name,
     in_chain = TreeChain(name=tree_name, files=in_files_name)
     # First create a new file to save the new tree in:
     out_file = root_open(out_name, "r+")
+
+    # Add the time shift if we want it in the tree
+    ExtraBranches = Tagged
+    if rand_t is not None:
+        ExtraBranches += Smeared
+
+    # Get the new tree with its extra branches
     out_tree = Tree(tree_name, model=ExtraBranches.prefix(prefix))
 
     # This creates all the same branches in the new tree but
@@ -82,11 +94,12 @@ def copy_in_trigger_signal(in_files_name, out_name, tree_name,
                              this_event_number in set_cdc_events)
         out_tree.__setattr__(prefix+"GoodTrig",
                              this_event_number in set_cth_events)
-        try:
-            out_tree.__setattr__(prefix+"SmearTime", rand_t[this_event_number])
-        except:
-            for key, item in entry.iteritems():
-                print key, item
+        if rand_t is not None:
+            try:
+                out_tree.__setattr__(prefix+"SmearTime", rand_t[this_event_number])
+            except:
+                for key, item in entry.iteritems():
+                    print key, item
         # Fill, noting that most of the buffer is shared between the chain
         # and the output tree
         out_tree.Fill()
@@ -107,26 +120,32 @@ def main():
     parser.add_argument("-l", "--layer",
                         dest="min_layer",
                         default=4,
+                        type=int,
                         help="Minimum max-layer needed for quality track")
     parser.add_argument("-n", "--n-hits",
                         dest="min_hits",
                         default=30,
+                        type=int,
                         help="Minimum number of hits for quality track")
     parser.add_argument("-m", "--min-time",
                         dest="min_t",
                         default=500.,
+                        type=float,
                         help="Minimum allowed hit time")
     parser.add_argument("-M", "--max-time",
                         dest="max_t",
                         default=1170.,
+                        type=float,
                         help="Maximum allowed hit time")
     parser.add_argument("-d", "--drift",
                         dest="drift",
                         default=450.,
+                        type=float,
                         help="Maximum allowed CDC drift time for hit")
     parser.add_argument("-s", "--smear",
                         dest="smear",
-                        default=50.,
+                        default=0.,
+                        type=float,
                         help="Smearing for signal events")
     parser.add_argument("-o", "--output",
                         dest="output",
@@ -140,26 +159,30 @@ def main():
     # Get arguments
     args = parser.parse_args()
 
-
     # Create an ordered dictionary of event IDs to random time smears
-    random_time = make_random_time(args.input_file, args.smear)
+    if args.smear == 0:
+        random_time = None
+    else:
+        random_time = make_random_time(args.input_file, args.smear)
     # Get the event indexes we will be using
-    good_cdc_events = import_cdc_sample(args.input_file, random_time,
+    good_cdc_events = import_cdc_sample(args.input_file, 
+                                        rand_t=random_time,
                                         min_t=args.min_t,
                                         max_t=args.max_t+args.drift,
                                         min_hits=args.min_hits,
                                         min_layer=args.min_layer)
-    good_cth_events = import_cth_sample(args.input_file, random_time,
+    good_cth_events = import_cth_sample(args.input_file, 
+                                        rand_t=random_time,
                                         min_t=args.min_t,
                                         max_t=args.max_t)
     copy_in_trigger_signal(args.input_file, args.output,
                            "CDCHitTree", "CDCHit.f",
                            good_cdc_events, good_cth_events,
-                           random_time)
+                           rand_t=random_time)
     copy_in_trigger_signal(args.input_file, args.output,
                            "CTHHitTree", "CTHHit.f",
                            good_cdc_events, good_cth_events,
-                           random_time)
+                           rand_t=random_time)
 
 if __name__ == '__main__':
     main()
