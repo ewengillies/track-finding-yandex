@@ -850,12 +850,12 @@ class CDCHits(GeomHits):
         # Check if events is empty
         if events is None:
             events = np.arange(self.n_events)
-        # TODO more robust check
-        # TODO put this in a function
-        if isinstance(events, int):
-            events = [events]
+        # Make it an iterable
+        my_events = events
+        if isinstance(my_events, (int, np.integer)):
+            my_events = [my_events]
         # Get the events as an array
-        my_events = np.sort(np.array(events))
+        my_events = np.sort(np.array(my_events))
         # Select the relevant event from data
         meas = self.get_events(my_events)[name]
         # Get the wire_ids and event_ids of the hit data
