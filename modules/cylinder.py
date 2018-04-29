@@ -1,6 +1,6 @@
+import math
 import numpy as np
 from root_numpy import root2array
-import math
 from scipy.sparse import lil_matrix, find
 from scipy.spatial.distance import pdist, squareform
 
@@ -496,8 +496,7 @@ class CTH(CylindricalArray):
         elif not trimmed_channel & is_lg_mask:
             return 1 + row_offset
         # Ignore the scintillator light guide
-        else:
-            return 4
+        return 4
 
     def chan_to_module(self, channel):
         """
@@ -519,8 +518,7 @@ class CTH(CylindricalArray):
             # Downstream is left handed, upstream is right handed
             handedness = np.asarray([-1, -1, 1, 1, 1])
             return 2 * math.pi / (np.asarray(n_by_layer) * handedness)
-        else:
-            return 2 * math.pi / np.asarray(n_by_layer)
+        return 2 * math.pi / np.asarray(n_by_layer)
 
 class TrackCenters(CylindricalArray):
     def __init__(self, r_min=10., r_max=50., rho_bins=10, arc_bins=0):
@@ -561,6 +559,9 @@ class RECBE(CylindricalArray):
         # Default file name
         recbe_file = "/home/five4three2/development/ICEDUST/"+\
                      "track-finding-yandex/data/chanmap_20160814.root"
+        recbe_file = "/home/elg112/development/ICEDUST/"+\
+                     "track_finding_standalone/track_finding_yandex/"+\
+                     "data/chanmap_20160814.root"
         # Set file name
         if not file_name is None:
             recbe_file = file_name
