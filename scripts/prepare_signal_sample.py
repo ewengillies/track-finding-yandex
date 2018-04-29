@@ -9,7 +9,7 @@ import numpy as np
 from root_numpy import root2array
 from rootpy.tree import Tree, TreeModel, TreeChain, BoolCol, FloatCol
 from rootpy.io import root_open
-from hits import CyDetHits, CTHHits
+from hits import CDCHits, CTHHits
 
 def make_random_time(signal_file, smear):
     rand_t = OrderedDict()
@@ -39,8 +39,8 @@ def import_cth_sample(cth_file, rand_t=None, min_t=500, max_t=1170):
 def import_cdc_sample(cdc_file, rand_t=None, min_t=500, max_t=1620,
                       min_hits=30, min_layer=4):
     # Import the hits
-    cdc_samp = CyDetHits(cdc_file, tree="CDCHitTree",
-                         selection="CDCHit.fIsSig == 1")
+    cdc_samp = CDCHits(cdc_file, tree="CDCHitTree",
+                       selection="CDCHit.fIsSig == 1")
     # Smear the times if the dictionary is in use
     if rand_t is not None:
         cdc_samp.data[cdc_samp.time_name] += \
