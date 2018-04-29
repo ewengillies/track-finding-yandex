@@ -561,6 +561,9 @@ class RECBE(CylindricalArray):
         # Default file name
         recbe_file = "/home/five4three2/development/ICEDUST/"+\
                      "track-finding-yandex/data/chanmap_20160814.root"
+        recbe_file = "/home/elg112/development/ICEDUST/"+\
+                     "track_finding_standalone/track_finding_yandex/"+\
+                     "data/chanmap_20160814.root"
         # Set file name
         if not file_name is None:
             recbe_file = file_name

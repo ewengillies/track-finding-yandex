@@ -850,6 +850,8 @@ class CDCHits(GeomHits):
         # Check if events is empty
         if events is None:
             events = np.arange(self.n_events)
+        # TODO more robust check
+        # TODO put this in a function
         if isinstance(events, int):
             events = [events]
         # Get the events as an array
