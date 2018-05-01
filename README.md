@@ -16,7 +16,7 @@ is not allowed in the Standard Model of particle physics, but has very good
 sensitivity to Beyond the Standard Model physics. 
 
 <p align="center">
-    <img src="https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/phase_i_no_background.png" width="500">
+    <img src="https://github.com/ewengillies/track-finding-yandex/blob/master/images/phase_i_no_background.png" width="500">
 </p>
 
 ### The Search for New Physics
@@ -41,7 +41,7 @@ a high intensity muon beam.  These components form the "beamline" of the
 experiment.
 
 <p align="center">
-    <img src="https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/PhaseI_schematic_no_back.png" width="500">
+    <img src="https://github.com/ewengillies/track-finding-yandex/blob/master/images/PhaseI_schematic_no_back.png" width="500">
 </p>
 
 The red arrow in the figure above represents the direction of the incoming 
@@ -69,7 +69,7 @@ to happen.  Below, we can see the muons in green colliding the with silver
 stopping target disks.  The disks are surrounded by the detector.
 
 <p align="center">
-    <img src="https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/particles_on_aluminum.png" width="500">
+    <img src="https://github.com/ewengillies/track-finding-yandex/blob/master/images/particles_on_aluminum.png" width="500">
 </p>
 
 The signal process would yield an electron with much higher energy than the
@@ -88,7 +88,7 @@ the wire, which is then readout and saved to a file.  These are referred to as
 ## Track Finding as a Classification Problem
 
 This section describes the algorithm constructed in 
-[this jupyter notebook](https://github.com/ewengillies/track-finding-yandex/blob/update_readme/notebooks/TrackFindingBDT.ipynb).
+[this jupyter notebook](https://github.com/ewengillies/track-finding-yandex/blob/master/notebooks/TrackFindingBDT.ipynb).
 Please see the notebook for more plots and for the code itself.
 
 The track finding algorithm must group signal hits in a given event so that the 
@@ -99,7 +99,7 @@ cylindrical detector, and leaving hits on the wires it passes. All of the hits
 in red are from background particles.  
 
 <p align="center">
-    <img src="https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/paricle_through_detector.png" width="500">
+    <img src="https://github.com/ewengillies/track-finding-yandex/blob/master/images/paricle_through_detector.png" width="500">
 </p>
 
 ### Features of a Hit
@@ -119,7 +119,7 @@ performance of the algorithm will often be compared to the performance of only
 using this feature, and not considering any others.**
 
 <p align="center">
-    <img src="https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/edep.png" width="500">
+    <img src="https://github.com/ewengillies/track-finding-yandex/blob/master/images/edep.png" width="500">
 </p>
 
 Classifying using this set of local features provides signifiant gains over 
@@ -140,7 +140,7 @@ Lets illustrate the rest of the algorithm by way of an example.  First, lets
 start with our unfiltered, unlabelled event:
 
 <p align="center">
-    <img src="https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/unlabeled_event.png" width="500"/>
+    <img src="https://github.com/ewengillies/track-finding-yandex/blob/master/images/unlabeled_event.png" width="500"/>
 </p>
 
 Needless to say, its not at all obvious to the naked eye if this event contains 
@@ -149,7 +149,7 @@ some labels to make it more obvious, where as before, blue is signal, red is
 background:
 
 <p align="center">
-    <img src="https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/labelled_event.png" width="500"/>
+    <img src="https://github.com/ewengillies/track-finding-yandex/blob/master/images/labelled_event.png" width="500"/>
 </p>
 
 The signal points are surrounded by background points.  The first stage of 
@@ -160,7 +160,7 @@ score, such that outlines with no fill mean a background-like response, whereas
 full circles indicate a signal like response:
 
 <p align="center">
-    <img src="https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/neighbour_class_event.png" width="500"/>
+    <img src="https://github.com/ewengillies/track-finding-yandex/blob/master/images/neighbour_class_event.png" width="500"/>
 </p>
 
 We can see in this event, this vastly improves our ability to spot the signal 
@@ -182,7 +182,7 @@ overlap of this green circle with a track centre awards that track centre with
 votes: 
 
 <p align="center">
-    <img src="https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/hough_transform_event.png" width="500"/>
+    <img src="https://github.com/ewengillies/track-finding-yandex/blob/master/images/hough_transform_event.png" width="500"/>
 </p>
 
 We can see that in this event, there are two distinct circles in the signal like 
@@ -194,7 +194,7 @@ determined by exponentially reweighing the voting score for each track centre,
 then to invert the mapping.  Graphically, this looks like: 
 
 <p align="center">
-    <img src="https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/inverse_hough_transform_event.png" width="500"/>
+    <img src="https://github.com/ewengillies/track-finding-yandex/blob/master/images/inverse_hough_transform_event.png" width="500"/>
 </p>
 
 With each track centre now voting on its favourite hit points, each hit point 
@@ -207,7 +207,7 @@ sample event by weighting each hit by the response to the final algorithm.  Here
 we drop the hit outlines and only leave the fills:
 
 <p align="center">
-    <img src="https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/classified_event.png" width="500"/>
+    <img src="https://github.com/ewengillies/track-finding-yandex/blob/master/images/classified_event.png" width="500"/>
 </p>
 
 We can see that the background hits are nearly all suppressed, with the 
@@ -222,7 +222,7 @@ true positive rate) vs. background hit rejection (i.e. 1 - false positive rate),
 and zoomed the axis range in on the regions we care about.  
 
 <p align="center">
-    <img src="https://github.com/ewengillies/track-finding-yandex/blob/update_readme/images/roc_curves.png" width="500"/>
+    <img src="https://github.com/ewengillies/track-finding-yandex/blob/master/images/roc_curves.png" width="500"/>
 </p>
 
 This plot compares 
