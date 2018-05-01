@@ -1,4 +1,3 @@
-
 # coding: utf-8
 
 # # Importing Files
@@ -111,7 +110,7 @@ def data_import_sample(this_signal, this_background,
     if not isinstance(branches, dict) and branches is not None:
         branches = dict()
     # Import the files with the cuts
-    print "Getting branches"
+    print("Getting branches")
     pprint(branches)
     back_cdc_sample = CDCHits(this_background, 
                               tree="CDCHitTree",
@@ -129,17 +128,17 @@ def data_import_sample(this_signal, this_background,
     events_to_keep = np.random.permutation(np.arange(0, more_events))[:less_events]
     # Trim the larger set
     if more_events == sig_hits.n_events:
-        print "Trimming Signal Events"
+        print("Trimming Signal Events")
         event_numbers = np.unique(sig_hits.cdc.get_events()[sig_hits.cdc.key_name])[events_to_keep]
         sig_hits.cdc.trim_events(event_numbers) 
         sig_hits.cth.trim_events(event_numbers) 
     else:
-        print "Trimming Background Events"
+        print("Trimming Background Events")
         event_numbers = np.unique(back_cdc_sample.get_events()[back_cdc_sample.key_name])[events_to_keep]
         back_cdc_sample.trim_events(event_numbers) 
-    print "CTH Sig Events {} ".format(sig_hits.cth.n_events)
-    print "CDC Sig Events {} ".format(sig_hits.cth.n_events)
-    print "CDC Back Events {} ".format(back_cdc_sample.n_events)
+    print("CTH Sig Events {} ".format(sig_hits.cth.n_events))
+    print("CDC Sig Events {} ".format(sig_hits.cth.n_events))
+    print("CDC Back Events {} ".format(back_cdc_sample.n_events))
     sig_hits.cdc.add_hits(back_cdc_sample.data)
     sig_hits.set_trigger_time()
     sig_hits.n_events = sig_hits.cdc.n_events
