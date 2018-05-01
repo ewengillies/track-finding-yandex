@@ -1,35 +1,103 @@
-
-# coding: utf-8
-
-# # Move Data to TFRecord
-
-# In[1]:
-
 import sys
 sys.path.insert(0, '../modules')
 from hits import CDCHits, CTHHits, CDCHits, FlatHits
-from memory_profiler import memory_usage
 from pprint import pprint
 from collections import Counter
 from root_numpy import list_branches
-get_ipython().magic('load_ext memory_profiler')
 from tracking import HoughSpace
 from scipy import sparse
 from tracking import HoughTransformer, HoughShifter
 from cylinder import CDC
 import scipy
+import glob
+import tensorflow as tf
+import numpy as np
+import sys
+from data_tools import *
 
-
-# # Convenience Functions
 
 # In[2]:
 
-# The most common are stored in these notebooks
-get_ipython().magic('run visualizations.ipynb')
-get_ipython().magic('run data_tools.ipynb')
+def load_images(n_images, height=18, width=300, depth=2, n_filled=80):
+    """
+    Generate (n_images * height * width * channels) numpy array with 
+    n_filled randomly filled entries per image.  Note that for a pixel, 
+    both channels are either filled (randomly) or they are both empty.
+    
+    Parameters
+    ----------
+    n_images : int 
+        Number of images
+    height : int
+        Height of each image
+    width : int
+        Width of each image
+    depth : int
+        Depth of each image
+    n_filled : int
+        Number of pixels filled in each event
+    
+    Returns
+    -------
+    images : ndarray
+        Array of shape (n_images * height * width * channels)
+    """
+    # Initialize the return value
+    image = np.zeros((n_images, height, width, 2))
+    # Select around n_filled * n_images channels to fill
+    layers = np.random.randint(0, high=height-1, size=(n_images, 80))
+    cells = np.random.randint(0, high=width-1, size=(n_images, 80))
+    # Fill the channels with random numbers
+    image[:, layers, cells, :] = np.random.random(size=(n_images, 80,2))
+    # Cast to 32 bits and return 
+    return image.astype(np.float32)
 
+def write_array_to_tfrecord(array, labels, filename, options=None):
+    # Open TFRecords file, ensure we use gzip compression
+    writer = tf.python_io.TFRecordWriter(filename, options=options)
+    
+    # Write all the images to a file
+    for lbl, img in zip(labels, array):
+        # Create a feature
+        image_as_bytes = tf.train.BytesList(value=[tf.compat.as_bytes(img.tostring())])
+        label_as_float = tf.train.FloatList(value=[lbl])
+        feature = {'train/label':  tf.train.Feature(float_list=label_as_float),
+                   'train/image':  tf.train.Feature(bytes_list=image_as_bytes)}
+        # Create an example protocol buffer
+        example = tf.train.Example(features=tf.train.Features(feature=feature))
+        # Serialize to string and write on the file
+        writer.write(example.SerializeToString())
+    
+    # Close the writer and flush the buffer
+    writer.close()
+    sys.stdout.flush()
+    
+def read_tfrecord_to_array(filename, options=None):
+    feature = {'train/image': tf.FixedLenFeature([], tf.string),
+               'train/label': tf.FixedLenFeature([], tf.float32)}
+    # Create a list of filenames and pass it to a queue
+    filename_queue = tf.train.string_input_producer([filename], num_epochs=1)
+    # Define a reader and read the next record
+    reader = tf.TFRecordReader(options=options)
+    _, serialized_example = reader.read(filename_queue)
+    # Decode the record read by the reader
+    features = tf.parse_single_example(serialized_example, features=feature)
+    # Convert the image data from string back to the numbers
+    image = tf.decode_raw(features['train/image'], tf.float32)
+    # Cast label data into int32
+    label = tf.cast(features['train/label'], tf.float32)
+    # Reshape image data into the original shape
+    image = tf.reshape(image, [18, 300, 2])
 
-# In[3]:
+    # Any preprocessing here ...
+
+    # Creates batches by randomly shuffling tensors
+    images, labels = tf.train.shuffle_batch([image, label], 
+                                            batch_size=1, 
+                                            capacity=3,
+                                            num_threads=1, 
+                                            min_after_dequeue=2)
+    return images, labels
 
 def set_additional_branches(sample, row_name=None, cell_id=None, relative_time=None):
     """
@@ -42,128 +110,34 @@ def set_additional_branches(sample, row_name=None, cell_id=None, relative_time=N
     if relative_time:
         sample.data[relative_time] = sample.data[sample.time_name] - sample.data[sample.trig_name]
 
-
-# ## Access data
-
-# In[4]:
-
-def get_measurment_and_neighbours(hit_sample, measurement, events=None):
-    """
-    Get the measurement on the wire and its neighbours in a classification-friendly way
-    
-    :return: a list of three numpy arrays of measurement 1) on wire, 2) to left, 3) to right
-    """
-    return [hit_sample.get_measurement(measurement, 
-                                       events, 
-                                       shift=i, 
-                                       only_hits=True, 
-                                       flatten=True) 
-                for i in [0,-1,1]]
-
-
-# ## Import the Signal Hits
-
-# In[5]:
-
-def test_labelling(hit_sample, sig_name, momentum_name, value):
-    current_labels = hit_sample.get_events()[sig_name]
-    momentum_magnitude = np.sqrt(np.square(hit_sample.get_events()[momentum_name+'.fX']) +                                 np.square(hit_sample.get_events()[momentum_name+'.fY']) +                                 np.square(hit_sample.get_events()[momentum_name+'.fZ']))
-    pid_values = hit_sample.get_events()[pid_name]
-    new_labels = np.logical_and(momentum_magnitude > value, pid_values == 11)
-    print("Number of signal now : {}".format(sum(current_labels)))
-    print("Number of signal actual : {}".format(sum(new_labels)))
-    print("Number mislabelled : {}".format(hit_sample.n_hits - sum(current_labels == new_labels)))
-
-
-# ### Make cuts
-
-# In[6]:
-
-def remove_coincidence(hit_samp, remove_hits=True):
-    # Sort by local score name
-    hit_samp.sort_hits(lcl_scr_name, ascending=False)
-    all_hits_keep = hit_samp.get_measurement(hit_samp.hits_index_name, only_hits=True)
-    # Make a mask   
-    hit_samp.data[take_hit_name][all_hits_keep.astype(int)] = 1
-    # Remove the hits
-    if remove_hits:
-        hit_samp.trim_hits(take_hit_name, values=1)
-        hit_samp.sort_hits(hit_samp.flat_name)
-
-
-# ## Define Our Samples
-
-# In[7]:
+# The most common are stored in these notebooks
 
 # Define some branches to import
 ## Existing branches
 prefix = "CDCHit.f"
 drift_name = prefix + "DriftTime"
-track_id_name = prefix + "Track.fTrackID"
-
-
 ## Branches to be filled
 row_name = prefix +"Layers"
 cell_id_name = prefix + "CellID"
 rel_time_name = prefix + "Relative_Time"
-take_hit_name = prefix + "Take_Hit"
-lcl_scr_name = prefix + "Local_Score"
-ngh_scr_name = prefix + "Neigh_Score"
-hgh_scr_name = prefix + "Hough_Score"
-trk_scr_name = prefix + "Track_Score"
-
 empty_branches = [row_name, 
                   cell_id_name,
                   rel_time_name]
-
-drift_dist_name = prefix + "DriftDist"
-turn_id_name = prefix + "TurnID"
-pid_name = prefix + "Track.fPID"
-parent_track_id_name = prefix + "Track.fParentTrackID"
-all_momentum_names = [ prefix + "Track.f" + st_sp + "Momentum.f" + coor 
-                       for st_sp in ["Start", "Stop"] for coor in ["X", "Y", "Z"] ]
-all_pos_names = [ prefix + "Track.f" + st_sp + "PosGlobal.f" + coor 
-                       for st_sp in ["Start", "Stop"] for coor in ["P.fX", "P.fY", "P.fZ", "E"] ]
-hit_pos_names = [ prefix + "MCPos.f" + coor for coor in ["P.fX", "P.fY", "P.fZ", "E"] ]
-hit_mom_names = [ prefix + "MCMom.f" + coor for coor in ["X", "Y", "Z"] ]
-
+# Branches we need
+hit_pos_names = [prefix + "MCPos.f" + coor
+                 for coor in ["P.fX", "P.fY", "P.fZ", "E"] ]
+hit_mom_names = [prefix + "MCMom.f" + coor for coor in ["X", "Y", "Z"] ]
 # For track fitting
-truth_branches = [turn_id_name] +                   hit_mom_names +                   hit_pos_names
-
-
-# In[8]:
-
+truth_branches = hit_mom_names + hit_pos_names
 these_branches = dict()
-these_branches["CDC"] = [drift_name, 
-                         track_id_name] + truth_branches
-these_branches["CTH"] = ["MCPos.fP.fX", "MCPos.fP.fY", "MCPos.fP.fZ"]
+these_branches["CDC"] = [drift_name, track_id_name] + truth_branches
 
-
-# In[9]:
-
-file_root = "/home/five4three2/development/ICEDUST/"            "track-finding-yandex/data/"
+# Open all of our files
+file_root = "/home/five4three2/development/ICEDUST/track-finding-yandex/data/"
 file_root = "~/development/ICEDUST/track-finding-yandex/data/MC4p/"
-sig_samples = ["oa_xx_xxx_09010000-0000_xerynzb6emaf_user-TrkTree_000_500signal-label.root",
-               "oa_xx_xxx_09110000-0000_2mdcao2ehzya_user-TrkTree_000_500signal-label.root",
-               "oa_xx_xxx_09210000-0000_opfmr3awxs2m_user-TrkTree_000_500signal-label.root",
-               "oa_xx_xxx_09310000-0000_v62e3u5ppkju_user-TrkTree_000_500signal-label.root",
-               "oa_xx_xxx_09410000-0000_z2p5ysva45vx_user-TrkTree_000_500signal-label.root",
-               "oa_xx_xxx_09510000-0000_3eox62hw5ygi_user-TrkTree_000_500signal-label.root",
-               "oa_xx_xxx_09610000-0000_7ctgq54tptae_user-TrkTree_000_500signal-label.root",
-               "oa_xx_xxx_09710000-0000_kah3t5htgouf_user-TrkTree_000_500signal-label.root",
-               "oa_xx_xxx_09810000-0000_a4tlhqvqnv4p_user-TrkTree_000_500signal-label.root",
-               "oa_xx_xxx_09910000-0000_h6g347twij7d_user-TrkTree_000_500signal-label.root"]
-sig_samples = [file_root + this_file for this_file in sig_samples]
-
-
-# ## Import the Data
-
-# In[24]:
-
-get_ipython().magic('run data_tools.ipynb')
-
-
-# In[11]:
+sig_samples = glob.glob(file_root+"/oa_xx_xxx_*500*root")
+print(sig_samples)
+assert 0
 
 train = data_import_file(sig_samples[-1],
                          use_cuts=["500","Trig","Track"],
@@ -180,22 +154,18 @@ pos = list()
 pos += ["MCPos.fP.fX"]
 pos += ["MCPos.fP.fY"]
 pos += ["MCPos.fP.fZ"]
-
 p = dict()
 p["cdc"] = dict()
 p["cdc"]["x"] =  train.cdc.prefix + pos[2]
 p["cdc"]["y"] =  train.cdc.prefix + pos[1]
 p["cdc"]["z"] =  train.cdc.prefix + pos[0]
-
 p["cth"] = dict()
 p["cth"]["x"] =  train.cth.prefix + pos[2]
 p["cth"]["y"] =  train.cth.prefix + pos[1]
 p["cth"]["z"] =  train.cth.prefix + pos[0]
-
 train.cdc.data[p["cdc"]["x"]] = - (train.cdc.data[p["cdc"]["x"]]/10. - 765)
 train.cdc.data[p["cdc"]["y"]] = train.cdc.data[p["cdc"]["y"]]/10.
 train.cdc.data[p["cdc"]["z"]] = (train.cdc.data[p["cdc"]["z"]]/10. - 641)
-
 train.cth.data[p["cth"]["x"]] = - (train.cth.data[p["cth"]["x"]]/10. - 765)
 train.cth.data[p["cth"]["y"]] = train.cth.data[p["cth"]["y"]]/10.
 train.cth.data[p["cth"]["z"]] = (train.cth.data[p["cth"]["z"]]/10. - 641)
@@ -205,75 +175,15 @@ mom = list()
 mom += ["MCMom.fX"]
 mom += ["MCMom.fY"]
 mom += ["MCMom.fZ"]
-
 m = dict()
 m["cdc"] = dict()
 m["cdc"]["x"] =  train.cdc.prefix + mom[2]
 m["cdc"]["y"] =  train.cdc.prefix + mom[1]
 m["cdc"]["z"] =  train.cdc.prefix + mom[0]
-
 train.cdc.data[m["cdc"]["x"]] = -train.cdc.data[m["cdc"]["x"]]
 
-
-# ## Remove Coincidence
-
-# In[12]:
-
+## Remove Coincidence
 train.cdc.sort_hits(rel_time_name)
-
-
-# In[ ]:
-
-# Choose a sample event
-hit_ids_mulit = None
-for evt in range(10,11):
-    # Initialize the fixed length array
-    number_layers = 18
-    max_number_wires = 300
-    number_channels = 2
-    an_array = np.zeros((18, 300, 2))
-    
-    # Get the wire and layer ids
-    hit_ids = train.cdc.event_to_hits[evt]
-    wire_ids = train.cdc.data[train.cdc.flat_name][hit_ids]
-    hit_and_wire_ids = np.array([hit_ids, wire_ids]).T
-    layer_ids = train.cdc.geom.get_layers(wire_ids)
-    cell_ids = train.cdc.geom.get_indexes(wire_ids)
-    
-    # Get the hit times
-    turn_id = train.cdc.get_measurement(turn_id_name, events=evt)
-    wires_and_counts = np.array(np.unique(wire_ids, return_counts=True)).T
-    all_data = None
-    if False:
-        pprint(train.cdc.data[train.cdc.edep_name][1170])
-        pprint(train.cdc.data[rel_time_name][1170])
-        pprint(train.cdc.data[train.cdc.flat_name][1170])
-    if len(np.unique(wire_ids)) != len(wire_ids):
-        print(len(np.unique(wire_ids)), len(wire_ids))
-        multi_wires = wires_and_counts[[wires_and_counts[:,1] != 1]][:,0]
-        multi_hits = np.array([hit_id for hit_id, wire_id in hit_and_wire_ids if wire_id in multi_wires])
-        #train.cdc.data[1170][train.cdc.hit_type_name] = 0.
-        #train.cdc.data[1068][train.cdc.hit_type_name] = 0.
-        #train.cdc.data[1151][train.cdc.hit_type_name] = 0.
-        #train.cdc.data[1096][train.cdc.hit_type_name] = 0.
-        all_data = np.array([train.cdc.data[train.cdc.flat_name][multi_hits].astype(int),
-                             multi_hits,
-                             train.cdc.data[train.cdc.edep_name][multi_hits],
-                             train.cdc.data[rel_time_name][multi_hits],
-                             train.cdc.data[train.cdc.hit_type_name][multi_hits].astype(int)]).T
-        all_data = all_data[all_data[:,0].argsort()]
-        #pprint(all_data[:9,(0,2,3,4)])
-        #hit_ids_multi = all_data[:9,1]
-        #pprint(hit_ids_multi)
-
-
-# In[50]:
-
-get_ipython().magic('run data_tools.ipynb')
-
-
-# In[51]:
-
 data_remove_coincidence(train)
 
 
@@ -317,106 +227,42 @@ for i in range(18):
     flat_array[:,i,:,:] = np.roll(flat_array[:,i,:,:], shift[i])
 flat_array = flat_array[no_bkg_hit_evts]
 
-
-# In[42]:
-
-figsize(60,4)
-size=100
-for evt in range(100):
-    event = flat_array[evt, :, :, 1]
-    positions = np.zeros((18, 300, 2))
-    positions[:, :, 0] = np.vstack([range(300)] * 18)
-    positions[:, :, 1] = np.vstack([range(18)] * 300).T
-    hits = np.nonzero(event)
-    plt.axis("off")
-    plt.xlim(-1, 300)
-    plt.ylim(-1, 18)
-    plt.scatter(positions[:,:,0], positions[:,:,1], s=size, 
-                marker='s', alpha=0.3, facecolors="none", edgecolor="black")
-    plt.scatter(positions[hits][:,0], positions[hits][:,1], s=size, 
-                marker='s', color="red", edgecolors="black")
-    for i in range(17):
-        plt.scatter(positions[i,-shift[i]/2:,0], positions[i,-shift[i]/2:,1], s=size, 
-                    marker='s', alpha=0.3,color="black")
-        plt.scatter(positions[i,:shift[i]/2,0], positions[i,:shift[i]/2,1], s=size, 
-                    marker='s', alpha=0.3,color="black")
-    image_name = "../images/2d_signal_"+str(evt)+".png"
-    plt.savefig(image_name, bbox_inches="tight")
-    plt.show()
-
-
-# ## Visualize the data
-
-# In[41]:
-
-fig_s = (12.5,12.5)
-s_scale = 35
-plot_recbes = True
-samp = train
-figsize(60,4)
-for evt in range(10):
-    # Plot the output
-    output = np.zeros(4482)
-    geom_ids = samp.cdc.get_measurement(samp.cdc.flat_name, evt).astype(int)
-    output[geom_ids] = 1
-    cut = output
-    plot_output(samp.cdc.get_hit_types(evt),
-                samp.cdc.geom, size=output*s_scale, figsize=fig_s)
-    # Add volume outlines
-    plot_add_cth_outlines(samp.cth.geom)
-    # Add the CTH vols with hits
-    cth_vol_types = samp.cth.get_vol_types(evt)
-    plot_add_cth(cth_vol_types, samp.cth.get_trig_vector(evt)[0], samp.cth.geom)
-    cth_hits = samp.cth.get_events(evt)
-    cdc_hits = samp.cdc.get_events(evt)
-    #plt.scatter(cth_hits[p["cth"]["x"]], 
-    #            cth_hits[p["cth"]["y"]], 
-    #            s=1, transform=gca().transData._b)
-    #plt.scatter(cdc_hits[p["cdc"]["x"]], 
-    #            cdc_hits[p["cdc"]["y"]], 
-    #            s=1, color="black",
-    #            transform=gca().transData._b)
-    plt.show()
+# TODO OPEN FOR LOOP OVER FILES HERE
+if False:
+    # Set the number of samples
+    n_random_samples = 10
+    original_images = load_images(n_random_samples)
+    original_labels = np.random.random(n_random_samples)
+    compression = tf.python_io.TFRecordCompressionType.GZIP
+    tf_io_opts = tf.python_io.TFRecordOptions(compression)
+    # Write the file
+    write_array_to_tfrecord(original_images, original_labels, "train.tfrecords", tf_io_opts)
+    # Read the files
+    new_images, new_labels = [], []
+    with tf.Session() as sess:
+        # Get the images and labels
+        tf_images, tf_labels = read_tfrecord_to_array("train.tfrecords", tf_io_opts)
+        # Initialize all global and local variables
+        init_op = tf.group(tf.global_variables_initializer(),
+                           tf.local_variables_initializer())
+        sess.run(init_op)
+        # Create a coordinator and run all QueueRunner objects
+        coord = tf.train.Coordinator()
+        threads = tf.train.start_queue_runners(coord=coord)
+        
+        for batch_index in range(n_random_samples):
+            img, lbl = sess.run([tf_images, tf_labels])
+            new_images += [img]
+            new_labels += [lbl]
     
-    #for a,b in [("x","y"), ("z","y"), ("x","z")]:
-        #plt.scatter(cdc_hits[p["cdc"][a]], 
-        #            cdc_hits[p["cdc"][b]], 
-        #            s=1, color="black")
-        #if a == "x":
-        #    plt.scatter(cth_hits[p["cth"][a]], 
-        #                cth_hits[p["cth"][b]], 
-        #                s=1, color="green")
-        #else:
-        #    plt.scatter(cth_hits[p["cth"][a]], 
-        #                cth_hits[p["cth"][b]], 
-        #                s=1, color="green")
-        #plt.xlabel(a)
-        #plt.ylabel(b)
-        #plt.show()
-    event = flat_array[evt, :, :, 1]
-    positions = np.zeros((18, 300, 2))
-    positions[:, :, 0] = np.vstack([range(300)] * 18)
-    positions[:, :, 1] = np.vstack([range(18)] * 300).T
-    hits = np.nonzero(event)
-    plt.axis("off")
-    plt.xlim(-1, 300)
-    plt.ylim(-1, 18)
-    plt.scatter(positions[:,:,0], positions[:,:,1], s=size, 
-                marker='s', alpha=0.3, facecolors="none", edgecolor="black")
-    plt.scatter(positions[hits][:,0], positions[hits][:,1], s=size, 
-                marker='s', color="blue", edgecolors="black")
-    for i in range(17):
-        plt.scatter(positions[i,-shift[i]/2:,0], positions[i,-shift[i]/2:,1], s=size, 
-                    marker='s', alpha=0.3,color="black")
-        plt.scatter(positions[i,:shift[i]/2,0], positions[i,:shift[i]/2,1], s=size, 
-                    marker='s', alpha=0.3,color="black")
-    image_name = "../images/2d_signal_"+str(evt)+".png"
-    plt.savefig(image_name, bbox_inches="tight")
-    plt.show()
-    print("=====================================================================")
-
-
-# In[ ]:
+        # Stop the threads
+        coord.request_stop()
+    
+        # Wait for threads to stop
+        coord.join(threads)
+        sess.close()
+    # Compare the two arrays
+    np.testing.assert_allclose(original_images, np.vstack(new_images), rtol=1e-7)
 
 
 
