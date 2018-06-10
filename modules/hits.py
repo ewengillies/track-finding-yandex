@@ -7,6 +7,19 @@ Notation used below:
  - layer_id is the index of layer
  - wire_index is the index of wire in the layer
 """
+def _is_sequence(arg):
+    """
+    Check if the argument is iterable
+    """
+    # Check for strings
+    if hasattr(arg, "strip"):
+        return False
+    # Check for iterable or indexable items
+    if hasattr(arg, "__getitem__") or hasattr(arg, "__iter__"):
+        return True
+    # Return false otherwise
+    return False
+
 def _return_branches_as_list(branches):
     """
     Ensures branches are given as list
@@ -14,7 +27,7 @@ def _return_branches_as_list(branches):
     # Deal with requested branches
     if branches is None:
         branches = []
-    if not isinstance(branches, list):
+    elif not _is_sequence(branches):
         branches = [branches]
     return branches
 
@@ -192,9 +205,9 @@ class FlatHits(object):
         :param branches: required branches
         """
         # Ensure branches is a list
-        if not isinstance(branches, list):
+        if not _is_sequence(branches):
             branches = [branches]
-        # Check the braches we want are there
+        # Check the branches we want are there
         _ = self._check_for_branches(path, tree, branches)
         # Grab the branches one by one to save on memory
         data_columns = []
@@ -363,7 +376,7 @@ class FlatHits(object):
         mask = np.ones(len(these_hits))
         if not values is None:
             # Switch to a list if a single value is given
-            if not isinstance(values, list):
+            if not _is_sequence(values):
                 values = [values]
             this_mask = np.in1d(these_hits[variable], values)
             mask = np.logical_and(mask, this_mask)
@@ -387,7 +400,7 @@ class FlatHits(object):
         if events is None:
             return self.data
         # Allow for a single event
-        if isinstance(events, int):
+        if not _is_sequence(events):
             evt_hits = self.event_to_hits[events]
         # Otherwise assume it is a list of events.
         else:
@@ -470,7 +483,7 @@ class FlatHits(object):
         """
         Remove a branch from the data
         """
-        if not isinstance(branch_names, list):
+        if not _is_sequence(branch_names):
             branch_names = [branch_names]
         all_names = list(self.data.dtype.names)
         for branch in branch_names:
@@ -852,7 +865,7 @@ class CDCHits(GeomHits):
             events = np.arange(self.n_events)
         # Make it an iterable
         my_events = events
-        if isinstance(my_events, (int, np.integer)):
+        if not _is_sequence(my_events):
             my_events = [my_events]
         # Get the events as an array
         my_events = np.sort(np.array(my_events))
@@ -1166,7 +1179,7 @@ class CTHHits(GeomHits):
         volume
         """
         # Allow for a single event
-        if isinstance(events, int):
+        if not _is_sequence(events):
             events = [events]
         # Find the hit indexes of all the volumes that have hits
         trig_vector = np.zeros((len(events), self.geom.n_points))
