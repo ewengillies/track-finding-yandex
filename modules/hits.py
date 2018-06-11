@@ -1,3 +1,4 @@
+from __future__ import print_function
 import numpy as np
 from root_numpy import root2array
 from cylinder import CDC, CTH
@@ -989,14 +990,19 @@ class CDCHits(GeomHits):
             occ[2, evt] = len(self.get_hit_vols(evt))
 
         # print some information
-        avg_n_hits = np.average(self.event_to_n_hits)
-        sig_occ = np.average(occ[0, :])
-        back_occ = np.average(occ[1, :])
-        avg_occ = np.average(occ[2, :])
-        print("Sig Occ: {} , Back Occ : {}".format(sig_occ, back_occ))
-        print("All Occ: {}, {}".format(avg_occ, avg_occ/self.geom.n_points))
-        print("NumHits: {}".format(avg_n_hits))
-        print("MinMultiHit: {}".format((avg_n_hits - avg_occ)/float(avg_occ)))
+        avg_n_hits, err_n_hits = np.average(self.event_to_n_hits), \
+                           np.std(self.event_to_n_hits)/np.sqrt(self.n_events)
+        sig_occ, sig_err = np.average(occ[0, :]), \
+                           np.std(occ[0, :])/np.sqrt(self.n_events)
+        back_occ, back_err = np.average(occ[1, :]), \
+                           np.std(occ[1, :])/np.sqrt(self.n_events)
+        all_occ, all_err = np.average(occ[2, :]), \
+                           np.std(occ[2, :])/np.sqrt(self.n_events)
+        print("Sig Occ: {} {}".format(sig_occ, sig_err))
+        print("Back Occ: {} {}".format(back_occ, back_err))
+        print("All Occ: {} {}".format(all_occ, all_err))
+        print("NumHits: {} {}".format(avg_n_hits, err_n_hits))
+        print("MinMultiHit: {}".format((avg_n_hits - all_occ)/float(all_occ)))
         return occ
 
 class CTHHits(GeomHits):

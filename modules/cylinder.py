@@ -557,11 +557,8 @@ class TrackCenters(CylindricalArray):
 class RECBE(CylindricalArray):
     def __init__(self, cdc, file_name=None):
         # Default file name
-        recbe_file = "/home/five4three2/development/ICEDUST/"+\
+        recbe_file = "~/development/ICEDUST/"+\
                      "track-finding-yandex/data/chanmap_20160814.root"
-        recbe_file = "/home/elg112/development/ICEDUST/"+\
-                     "track_finding_standalone/track_finding_yandex/"+\
-                     "data/chanmap_20160814.root"
         # Set file name
         if not file_name is None:
             recbe_file = file_name
