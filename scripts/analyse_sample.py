@@ -5,8 +5,8 @@ Executable for trimming down signal
 
 import sys
 from argparse import ArgumentParser
-import data_tools
-sys.path.insert(0, '../modules')
+import data_tools as dts
+import visualizations as viz
 
 def main():
     parser = ArgumentParser(prog="./analyse_sample.py",
@@ -94,20 +94,27 @@ def main():
     these_branches["CTH"] = None
 
     # Get the event indexes we will be using
-    train = data_tools.data_import_sample(args.sig_file,
-                                          args.back_file,
-                                          these_cuts=["500", "Trig", "Track"],
-                                          branches=these_branches,
-                                          empty_branches=empty_branches)
+    train = dts.data_import_sample(args.sig_file,
+                                   args.back_file,
+                                   these_cuts=["500", "Trig", "Track"],
+                                   branches=these_branches,
+                                   empty_branches=empty_branches)
 
-    data_tools.data_set_additional_branches(train.cdc,
-                                            row_name=row_name,
-                                            cell_id=cell_id_name,
-                                            relative_time=rel_time_name)
+    dts.data_set_additional_branches(train.cdc,
+                                     row_name=row_name,
+                                     cell_id=cell_id_name,
+                                     relative_time=rel_time_name)
 
     sig_occ, back_occ, occ = train.cdc.get_occupancy()
 
-    # Plot some events in order
+    # Plot some features
+    bins_for_plots = 50
+    viz.plot_feature(train.cth.get_signal_hits()[train.cth.time_name],
+                     train.cth.get_background_hits()[train.cth.time_name],
+                     xlabel="Detected Time [ns]", ylabel="Normalised Hit Count",
+                     xlog=False,
+                     title="Detected Time of Hits",
+                     nbins=bins_for_plots)
 
 if __name__ == '__main__':
     main()
