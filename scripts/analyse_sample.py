@@ -55,40 +55,6 @@ def main():
                         default="",
                         type=str,
                         help="Prefix for all output file names")
-    #parser.add_argument("-n", "--n-hits",
-    #                    dest="min_hits",
-    #                    default=30,
-    #                    type=int,
-    #                    help="Minimum number of hits for quality track")
-    #parser.add_argument("-m", "--min-time",
-    #                    dest="min_t",
-    #                    default=500.,
-    #                    type=float,
-    #                    help="Minimum allowed hit time")
-    #parser.add_argument("-M", "--max-time",
-    #                    dest="max_t",
-    #                    default=1170.,
-    #                    type=float,
-    #                    help="Maximum allowed hit time")
-    #parser.add_argument("-d", "--drift",
-    #                    dest="drift",
-    #                    default=450.,
-    #                    type=float,
-    #                    help="Maximum allowed CDC drift time for hit")
-    #parser.add_argument("-s", "--smear",
-    #                    dest="smear",
-    #                    default=0.,
-    #                    type=float,
-    #                    help="Smearing for signal events")
-    #parser.add_argument("-o", "--output",
-    #                    dest="output",
-    #                    default="checked_signal",
-    #                    help="Name of the output file")
-    #parser.add_argument("-v", "--verbose",
-    #                    dest="verbose",
-    #                    default=False,
-    #                    action="store_true",
-    #                    help="Name of the output file")
     # Get arguments
     args = parser.parse_args()
 
@@ -242,7 +208,7 @@ def main():
                                           only_hits=False,
                                           flatten=False).astype(int) + 1
     data_time = time.time()
-    print("Access seconds : {}".format(data_time - tstart))
+    print("Access Time: {} s".format(data_time - tstart))
     # Multiprocess the images
     pool = multiprocessing.Pool()
     pool.map(plot_one_event, zip(hit_types,
@@ -250,8 +216,8 @@ def main():
                                  [args.output_dir]*train.cdc.n_events,
                                  [train.cdc.geom]*train.cdc.n_events))
     done_time = time.time()
-    print("Drawing seconds : {}".format(done_time - data_time))
-    print("Total seconds : {}".format(done_time - tstart))
+    print("Drawing Time: {} s".format(done_time - data_time))
+    print("Total Time: {} s".format(done_time - tstart))
 
 if __name__ == '__main__':
     main()
