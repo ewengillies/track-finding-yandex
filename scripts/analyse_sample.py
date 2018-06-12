@@ -10,6 +10,28 @@ import data_tools as dts
 import visualizations as viz
 import matplotlib.pyplot as plt
 import numpy as np
+import multiprocessing
+
+def plot_one_event(args):
+    hit_t, (event_id_bkg, event_id_signal), output_dir, geom = args
+    to_plot = np.take([0, 2, 1], hit_t)
+    axis, fig = viz.plot_output(to_plot,
+                                geom,
+                                #fig=fig, axis=axis,
+                                figsize=(15, 15))
+    textstr = "Event ID Background {}".format(event_id_bkg)+\
+              "\nEvent ID Signal {}".format(event_id_signal)
+    # Create the text if needed, otherwise just update its text
+    axis.text(0.005, 0.995, textstr, transform=axis.transAxes,
+              verticalalignment='top',
+              horizontalalignment='left',
+              fontsize=15)
+    # Save the file
+    file_name = output_dir +\
+        "event_bkg-{}_sig-{}.png".format(event_id_bkg, event_id_signal)
+    fig.savefig(file_name, bbox_inches='tight')
+    fig.clear()
+
 
 def main():
     parser = ArgumentParser(prog="./analyse_sample.py",
@@ -205,48 +227,28 @@ def main():
     #fig.savefig(args.output_dir+"sig_back_occupancy_cdc.png")
     #fig.clear()
 
-    #tstart = time.time()
-    #num_plots = 0
-    #while time.time()-tstart < 1:
-    #    line.set_ydata(np.random.randn(100))
-    #    fig.canvas.draw()
-    #    fig.canvas.flush_events()
-    #    num_plots += 1
-    #print(num_plots)
-
     #for event in range(train.n_events):
     tstart = time.time()
-    axis, fig, text = None, None, None
-    events = range(10)
+    n_events = 100
+    events = range(n_events)
+    # Get all the event data
+    event_ids = train.cdc.get_measurement(train.cdc.key_name,
+                                          events=events,
+                                          default=-100,
+                                          only_hits=False,
+                                          flatten=False).astype(int)
+    event_ids = np.array([np.unique(some_ids)[1:] for some_ids in event_ids])
     hit_types = train.cdc.get_measurement("CDCHit.fIsSig",
                                           events=events,
                                           default=-1,
                                           only_hits=False,
                                           flatten=False).astype(int) + 1
-    for hit_t, event in zip(hit_types, events):
-        to_plot = np.take([0, 2, 1], hit_t)
-        axis, fig = viz.plot_output(to_plot,
-                                    train.cdc.geom,
-                                    #fig=fig, axis=axis,
-                                    figsize=(15, 15))
-        # Label the picture
-        event_id_bkg, event_id_signal = np.unique(
-            train.cdc.get_events(event)[train.cdc.key_name])
-        textstr = "Event ID Background {}".format(event_id_bkg)+\
-                  "\nEvent ID Signal {}".format(event_id_signal)
-        # Create the text if needed, otherwise just update its text
-        if text is None:
-            text = axis.text(0.005, 0.995, textstr, transform=axis.transAxes,
-                             verticalalignment='top',
-                             horizontalalignment='left',
-                             fontsize=15)
-        else:
-            text.set_text(textstr)
-        # Save the file
-        file_name = args.output_dir +\
-            "event_bkg-{}_sig-{}.png".format(event_id_bkg, event_id_signal)
-        fig.savefig(file_name, bbox_inches='tight')
-        fig.clear()
+    # Multiprocess the images
+    pool = multiprocessing.Pool()
+    pool.map(plot_one_event, zip(hit_types,
+                                 event_ids,
+                                 [args.output_dir]*n_events,
+                                 [train.cdc.geom]*n_events))
     print("Total seconds : {}".format(time.time() - tstart))
 
 if __name__ == '__main__':
