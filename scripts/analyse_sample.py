@@ -243,13 +243,17 @@ def main():
                                           default=-1,
                                           only_hits=False,
                                           flatten=False).astype(int) + 1
+    data_time = time.time()
+    print("Access seconds : {}".format(data_time - tstart))
     # Multiprocess the images
     pool = multiprocessing.Pool()
     pool.map(plot_one_event, zip(hit_types,
                                  event_ids,
                                  [args.output_dir]*n_events,
                                  [train.cdc.geom]*n_events))
-    print("Total seconds : {}".format(time.time() - tstart))
+    done_time = time.time()
+    print("Drawing seconds : {}".format(done_time - data_time))
+    print("Total seconds : {}".format(done_time - tstart))
 
 if __name__ == '__main__':
     main()
