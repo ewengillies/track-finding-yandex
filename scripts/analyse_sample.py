@@ -247,8 +247,8 @@ def main():
     pool = multiprocessing.Pool()
     pool.map(plot_one_event, zip(hit_types,
                                  event_ids,
-                                 [args.output_dir]*n_events,
-                                 [train.cdc.geom]*n_events))
+                                 [args.output_dir]*train.cdc.n_events,
+                                 [train.cdc.geom]*train.cdc.n_events))
     done_time = time.time()
     print("Drawing seconds : {}".format(done_time - data_time))
     print("Total seconds : {}".format(done_time - tstart))
