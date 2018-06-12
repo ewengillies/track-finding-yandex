@@ -621,7 +621,7 @@ def plot_occupancies(sig_occu, back_occu, occu,
                      n_vols=4482,
                      x_pos=0.5, y_pos=0.5):
     vol_norm = n_vols / 100.
-    ax1, _ = plot_feature(sig_occu, back_occu,
+    ax1, fig = plot_feature(sig_occu, back_occu,
                             xlabel="Number of Wires Filled",
                             ylabel="Number of Events",
                             normed=False)
@@ -653,6 +653,8 @@ def plot_occupancies(sig_occu, back_occu, occu,
              verticalalignment='top',
              horizontalalignment='left',
              fontsize=13)
+
+    return ax1, fig
 
 def plot_feature_importance(classifier_and_feature,
                             feat_label_dict=None,
