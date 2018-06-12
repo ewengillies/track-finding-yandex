@@ -5,6 +5,7 @@ Executable for trimming down signal
 
 import os
 from argparse import ArgumentParser
+import time
 import data_tools as dts
 import visualizations as viz
 import matplotlib.pyplot as plt
@@ -116,117 +117,137 @@ def main():
                                      cell_id=cell_id_name,
                                      relative_time=rel_time_name)
 
-    # Plot some features
-    bins_for_plots = 50
-    # DETECTED TIME CTH #
-    _, fig = viz.plot_feature(
-        train.cth.get_signal_hits()[train.cth.time_name],
-        train.cth.get_background_hits()[train.cth.time_name],
-        xlabel="Detected Time [ns]", ylabel="Normalised Hit Count",
-        xlog=False,
-        title="Detected Time of Hits in CTH",
-        nbins=bins_for_plots)
-    fig.set_size_inches(10, 5)
-    fig.savefig(args.output_dir+"detected_time_cth.png")
-    fig.clear()
-    # DETECTED TIME CDC #
-    _, fig = viz.plot_feature(
-        train.cdc.get_signal_hits()[train.cdc.time_name],
-        train.cdc.get_background_hits()[train.cdc.time_name],
-        xlabel="Detected Time [ns]", ylabel="Normalised Hit Count",
-        xlog=False,
-        title="Detected Time of Hits in CTH",
-        nbins=bins_for_plots)
-    fig.savefig(args.output_dir+"detected_time_cdc.png")
-    fig.clear()
-    # DRIFT TIME #
-    _, fig = viz.plot_feature(train.cdc.get_signal_hits()[drift_name],
-                              train.cdc.get_background_hits()[drift_name],
-                              xlabel="Drift time [ns]",
-                              ylabel="Normalised Hit Count",
-                              xlog=False,
-                              title="Drift Time of Hits in CDC",
-                              nbins=bins_for_plots)
-    fig.savefig(args.output_dir+"drift_time_cdc.png")
-    fig.clear()
-    # TRUTH TIME CDC #
-    _, fig = viz.plot_feature(
-        train.cdc.get_signal_hits()[train.cdc.time_name] -\
-            train.cdc.get_signal_hits()[drift_name],
-        train.cdc.get_background_hits()[train.cdc.time_name] -\
-            train.cdc.get_background_hits()[drift_name],
-        xlabel="Truth time [ns]", ylabel="Normalised Hit Count",
-        xlog=False,
-        title="Truth Time of Hits in CDC",
-        nbins=bins_for_plots)
-    fig.savefig(args.output_dir+"truth_time_cdc.png")
-    fig.clear()
-    # RELATIVE TIME CDC #
-    _, fig = viz.plot_feature(train.cdc.get_signal_hits()[rel_time_name],
-                              train.cdc.get_background_hits()[rel_time_name],
-                              xlabel="Relative Time [ns]",
-                              ylabel="Normalised Hit Count",
-                              xlog=False,
-                              title="Relative Time",
-                              nbins=bins_for_plots)
-    fig.savefig(args.output_dir+"relative_time_cdc.png")
-    fig.clear()
-    # CHARGE DEPOSITION CDC #
-    _, fig = viz.plot_feature(
-        np.log10(train.cdc.get_signal_hits()[train.cdc.edep_name] + 1),
-        np.log10(train.cdc.get_background_hits()[train.cdc.edep_name] + 1),
-        xlabel="log10(Charge Deposition [e])",
-        ylabel="Normalised Hit Count",
-        xlog=False,
-        title="Charge Depostion",
-        nbins=bins_for_plots)
-    fig.savefig(args.output_dir+"charge_deposition_cdc.png")
-    fig.clear()
-    # LAYER ID CDC #
-    _, fig = viz.plot_feature(train.cdc.get_signal_hits()[row_name],
-                              train.cdc.get_background_hits()[row_name],
-                              xlabel="Layer ID", ylabel="Normalised Hit Count",
-                              xlog=False,
-                              title="Layer Number",
-                              nbins=18)
-    fig.savefig(args.output_dir+"layer_id_cdc.png")
-    fig.clear()
-    # OCCUPANCIES
-    sig_occ, back_occ, occ = train.cdc.get_occupancy()
-    plt.title("Occupancy of Events")
-    plt.xlabel("% of Wires Hit")
-    plt.ylabel("Number of Events / bin")
-    plt.hist(np.array(occ)/4482., bins=50)
-    fig.savefig(args.output_dir+"total_occupancy_cdc.png")
-    fig.clear()
-    viz.plot_occupancies(sig_occ, back_occ, occ,
-                         n_vols=4482, x_pos=0.2, y_pos=0.8)
-    fig.savefig(args.output_dir+"sig_back_occupancy_cdc.png")
-    fig.clear()
+    ## Plot some features
+    #bins_for_plots = 50
+    ## DETECTED TIME CTH #
+    #_, fig = viz.plot_feature(
+    #    train.cth.get_signal_hits()[train.cth.time_name],
+    #    train.cth.get_background_hits()[train.cth.time_name],
+    #    xlabel="Detected Time [ns]", ylabel="Normalised Hit Count",
+    #    xlog=False,
+    #    title="Detected Time of Hits in CTH",
+    #    nbins=bins_for_plots)
+    #fig.set_size_inches(10, 5)
+    #fig.savefig(args.output_dir+"detected_time_cth.png")
+    #fig.clear()
+    ## DETECTED TIME CDC #
+    #_, fig = viz.plot_feature(
+    #    train.cdc.get_signal_hits()[train.cdc.time_name],
+    #    train.cdc.get_background_hits()[train.cdc.time_name],
+    #    xlabel="Detected Time [ns]", ylabel="Normalised Hit Count",
+    #    xlog=False,
+    #    title="Detected Time of Hits in CTH",
+    #    nbins=bins_for_plots)
+    #fig.savefig(args.output_dir+"detected_time_cdc.png")
+    #fig.clear()
+    ## DRIFT TIME #
+    #_, fig = viz.plot_feature(train.cdc.get_signal_hits()[drift_name],
+    #                          train.cdc.get_background_hits()[drift_name],
+    #                          xlabel="Drift time [ns]",
+    #                          ylabel="Normalised Hit Count",
+    #                          xlog=False,
+    #                          title="Drift Time of Hits in CDC",
+    #                          nbins=bins_for_plots)
+    #fig.savefig(args.output_dir+"drift_time_cdc.png")
+    #fig.clear()
+    ## TRUTH TIME CDC #
+    #_, fig = viz.plot_feature(
+    #    train.cdc.get_signal_hits()[train.cdc.time_name] -\
+    #        train.cdc.get_signal_hits()[drift_name],
+    #    train.cdc.get_background_hits()[train.cdc.time_name] -\
+    #        train.cdc.get_background_hits()[drift_name],
+    #    xlabel="Truth time [ns]", ylabel="Normalised Hit Count",
+    #    xlog=False,
+    #    title="Truth Time of Hits in CDC",
+    #    nbins=bins_for_plots)
+    #fig.savefig(args.output_dir+"truth_time_cdc.png")
+    #fig.clear()
+    ## RELATIVE TIME CDC #
+    #_, fig = viz.plot_feature(train.cdc.get_signal_hits()[rel_time_name],
+    #                          train.cdc.get_background_hits()[rel_time_name],
+    #                          xlabel="Relative Time [ns]",
+    #                          ylabel="Normalised Hit Count",
+    #                          xlog=False,
+    #                          title="Relative Time",
+    #                          nbins=bins_for_plots)
+    #fig.savefig(args.output_dir+"relative_time_cdc.png")
+    #fig.clear()
+    ## CHARGE DEPOSITION CDC #
+    #_, fig = viz.plot_feature(
+    #    np.log10(train.cdc.get_signal_hits()[train.cdc.edep_name] + 1),
+    #    np.log10(train.cdc.get_background_hits()[train.cdc.edep_name] + 1),
+    #    xlabel="log10(Charge Deposition [e])",
+    #    ylabel="Normalised Hit Count",
+    #    xlog=False,
+    #    title="Charge Depostion",
+    #    nbins=bins_for_plots)
+    #fig.savefig(args.output_dir+"charge_deposition_cdc.png")
+    #fig.clear()
+    ## LAYER ID CDC #
+    #_, fig = viz.plot_feature(train.cdc.get_signal_hits()[row_name],
+    #                          train.cdc.get_background_hits()[row_name],
+    #                          xlabel="Layer ID", ylabel="Normalised Hit Count",
+    #                          xlog=False,
+    #                          title="Layer Number",
+    #                          nbins=18)
+    #fig.savefig(args.output_dir+"layer_id_cdc.png")
+    #fig.clear()
+    ## OCCUPANCIES
+    #sig_occ, back_occ, occ = train.cdc.get_occupancy()
+    #plt.title("Occupancy of Events")
+    #plt.xlabel("% of Wires Hit")
+    #plt.ylabel("Number of Events / bin")
+    #plt.hist(np.array(occ)/4482., bins=50)
+    #fig.savefig(args.output_dir+"total_occupancy_cdc.png")
+    #fig.clear()
+    #viz.plot_occupancies(sig_occ, back_occ, occ,
+    #                     n_vols=4482, x_pos=0.2, y_pos=0.8)
+    #fig.savefig(args.output_dir+"sig_back_occupancy_cdc.png")
+    #fig.clear()
 
-    # Plot the events
-    fig.set_size_inches(15, 15)
-    for event in range(train.n_events):
-        hit_types = train.cdc.get_measurement("CDCHit.fIsSig",
-                                              events=event,
-                                              default=-1,
-                                              only_hits=False,
-                                              flatten=True).astype(int) + 1
-        to_plot = np.take([0, 2, 1], hit_types)
-        axis, fig = viz.plot_output(to_plot, train.cdc.geom)
+    #tstart = time.time()
+    #num_plots = 0
+    #while time.time()-tstart < 1:
+    #    line.set_ydata(np.random.randn(100))
+    #    fig.canvas.draw()
+    #    fig.canvas.flush_events()
+    #    num_plots += 1
+    #print(num_plots)
+
+    #for event in range(train.n_events):
+    tstart = time.time()
+    axis, fig, text = None, None, None
+    events = range(10)
+    hit_types = train.cdc.get_measurement("CDCHit.fIsSig",
+                                          events=events,
+                                          default=-1,
+                                          only_hits=False,
+                                          flatten=False).astype(int) + 1
+    for hit_t, event in zip(hit_types, events):
+        to_plot = np.take([0, 2, 1], hit_t)
+        axis, fig = viz.plot_output(to_plot,
+                                    train.cdc.geom,
+                                    #fig=fig, axis=axis,
+                                    figsize=(15, 15))
         # Label the picture
         event_id_bkg, event_id_signal = np.unique(
             train.cdc.get_events(event)[train.cdc.key_name])
         textstr = "Event ID Background {}".format(event_id_bkg)+\
                   "\nEvent ID Signal {}".format(event_id_signal)
-        axis.text(0.005, 0.995, textstr, transform=axis.transAxes,
-                  verticalalignment='top',
-                  horizontalalignment='left',
-                  fontsize=15)
+        # Create the text if needed, otherwise just update its text
+        if text is None:
+            text = axis.text(0.005, 0.995, textstr, transform=axis.transAxes,
+                             verticalalignment='top',
+                             horizontalalignment='left',
+                             fontsize=15)
+        else:
+            text.set_text(textstr)
         # Save the file
-        file_name = args.output_dir + "event_{}.png".format(event)
+        file_name = args.output_dir +\
+            "event_bkg-{}_sig-{}.png".format(event_id_bkg, event_id_signal)
         fig.savefig(file_name, bbox_inches='tight')
         fig.clear()
+    print("Total seconds : {}".format(time.time() - tstart))
 
 if __name__ == '__main__':
     main()

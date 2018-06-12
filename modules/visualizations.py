@@ -68,10 +68,11 @@ def plot_get_hits(labels):
     bkg_hits = np.where(labels == 2)
     return sig_hits, bkg_hits
 
-def plot_output(labels, cydet, size=DOT_SIZE*np.ones(N_WIRES), tolerance=0.,
+def plot_output(labels, cydet, axis=None, fig=None,
+                size=DOT_SIZE*np.ones(N_WIRES), tolerance=0.,
                 sig_color="blue", bkg_color="red", figsize=(12, 14),
                 add_transform=False, hough=PLOT_HOUGH,
-                rotate_even=0, no_labels=False, recbe=None, **kwargs):
+                rotate_even=None, no_labels=False, recbe=None, **kwargs):
     """
     Draw the output of a classifier by scaling the hits to the size of the
     output.
@@ -84,30 +85,34 @@ def plot_output(labels, cydet, size=DOT_SIZE*np.ones(N_WIRES), tolerance=0.,
 
     :return: axis of plot, figure of plot
     """
-    # Set the default font
-    plot_set_font()
     # Get the hits from the labels
     sig_hits, bkg_hits = plot_get_hits(labels)
-    # Get axis and figure
-    fig = plt.figure(1, figsize=figsize)
-    axis = fig.add_subplot(111, projection='polar')
-    axis.set_ylim([0, 85])
-    # Set theta ticks at 45 degrees
-    thetaticks = np.arange(0, 360, 45)
-    # Set ticks further out from edge
-    axis.set_thetagrids(thetaticks, frac=1.05)
-    # Set radial ticks
-    axis.set_yticks(np.arange(10, 81, 20))
-    if no_labels:
-        axis.set_xticklabels([])
-        axis.set_yticklabels([])
+    # Check if we need to build the axes
+    if (axis is None) and (fig is None):
+        # Set the default font
+        plot_set_font()
+        # Get axis and figure
+        fig = plt.figure(1, figsize=figsize)
+        fig.set_size_inches(figsize)
+        axis = fig.add_subplot(111, projection='polar')
+        axis.set_ylim([0, 85])
+        # Set theta ticks at 45 degrees
+        thetaticks = np.arange(0, 360, 45)
+        # Set ticks further out from edge
+        axis.set_thetagrids(thetaticks, frac=1.05)
+        # Set radial ticks
+        axis.set_yticks(np.arange(10, 81, 20))
+        if no_labels:
+            axis.set_xticklabels([])
+            axis.set_yticklabels([])
     # Plot all wires
-    wire_rhos = cydet.get_points_rhos_and_phis()[0].copy()
-    wire_phis = cydet.get_points_rhos_and_phis()[1].copy()
+    wire_rhos, wire_phis = cydet.get_points_rhos_and_phis()
     #Add a rotation to the layers
-    if rotate_even != 0:
+    if rotate_even is not None:
+        wire_phis = wire_phis.copy()
         even_wires = np.where(cydet.point_pol == 0)[0]
         wire_phis[even_wires] += rotate_even
+    # Add the wires in
     axis.scatter(wire_phis, wire_rhos, marker='.', s=5, alpha=0.2)
     # Plot signal hits
     axis.scatter(wire_phis[sig_hits], wire_rhos[sig_hits], s=size[sig_hits],
@@ -474,7 +479,7 @@ def plot_evt_feature(feature, labels,
                   label='Background', log=ylog, alpha=0.5, color="red")
         axis.set_xticks(np.arange(axis.get_xticks()[0], axis.get_xticks()[-1]))
         axis.set_xticklabels([str(10**power) for power in axis.get_xticks()])
-        #axis.set_xticklabels([r"$10^{"+str(power)+"}$" 
+        #axis.set_xticklabels([r"$10^{"+str(power)+"}$"
         #                     for power in axis.get_xticks()])
     else:
         axis.hist(feature[sig],
