@@ -229,7 +229,7 @@ def main():
 
     #for event in range(train.n_events):
     tstart = time.time()
-    n_events = 100
+    n_events = 1000
     events = range(n_events)
     # Get all the event data
     event_ids = train.cdc.get_measurement(train.cdc.key_name,
