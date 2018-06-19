@@ -55,6 +55,16 @@ def main():
                         default="",
                         type=str,
                         help="Prefix for all output file names")
+    parser.add_argument("-e", "--events",
+                        dest="n_events",
+                        default=None,
+                        type=int,
+                        help="Number of events to plot")
+    parser.add_argument("-s", "--seed",
+                        dest="seed",
+                        default=None,
+                        type=int,
+                        help="Random number seed")
     # Get arguments
     args = parser.parse_args()
 
@@ -63,6 +73,9 @@ def main():
         print("Output directory {} does not exist!".format(args.output_dir))
         return 1
     args.output_dir += "/" + args.name
+    # Set the random nuber seed
+    if args.seed is not None:
+        np.random.seed(args.seed)
 
     # Define some branches to import
     ## Existing branches
@@ -100,10 +113,16 @@ def main():
                                    these_cuts=["500", "Trig", "Track"],
                                    branches=these_branches,
                                    empty_branches=empty_branches)
+    # Remove the coincidence
+    dts.data_remove_coincidence(train, sort_hits=True)
+    # Set the additional branches
     dts.data_set_additional_branches(train.cdc,
                                      row_name=row_name,
                                      cell_id=cell_id_name,
                                      relative_time=rel_time_name)
+    # Set the default number of events
+    if args.n_events is None:
+        args.n_events = train.cdc.n_events
 
     # Plot some features
     bins_for_plots = 50
@@ -194,7 +213,7 @@ def main():
     fig.clear()
     # Plot the events
     tstart = time.time()
-    events = range(train.cdc.n_events)
+    events = range(args.n_events)
     # Get all the event data
     event_ids = train.cdc.get_measurement(train.cdc.key_name,
                                           events=events,

@@ -172,7 +172,7 @@ def data_import_sample(this_signal, this_background,
     # TODO hack fix the background cth and cdc to allow for empty cth events
     back_hits.cth.data[back_hits.cth.event_index_name] = \
             back_hits.cth.data[back_hits.cth.key_name] - \
-            np.amin(back_hits.cth.data[back_hits.cth.key_name])
+            np.amin(back_hits.cdc.data[back_hits.cdc.key_name])
     back_hits.n_events = max(back_hits.cdc.n_events, back_hits.cth.n_events)
     # Import the signal file
     sig_hits = data_import_file(this_signal, signal=True,
@@ -199,29 +199,40 @@ def data_import_sample(this_signal, this_background,
     print(("CTH Back Events {} ".format(back_hits.cth.n_events)))
     print(("CDC Sig Events {} ".format(sig_hits.cth.n_events)))
     print(("CDC Back Events {} ".format(back_hits.cth.n_events)))
-    back_hits.cdc.add_hits(sig_hits.cdc.data)
-    back_hits.cth.add_hits(sig_hits.cth.data)
-    back_hits.set_trigger_time()
-    back_hits.n_events = back_hits.cdc.n_events
-    return back_hits
+    sig_hits.cdc.add_hits(back_hits.cdc.data)
+    sig_hits.cth.add_hits(back_hits.cth.data)
+    sig_hits.set_trigger_time()
+    sig_hits.n_events = sig_hits.cdc.n_events
+    return sig_hits
 
 def data_remove_coincidence(sample, sort_hits=True):
     # Get the energy deposition summed
     all_events = np.arange(sample.cdc.n_events)
-    edep_sparse = scipy.sparse.lil_matrix((sample.cdc.n_events, sample.cdc.geom.n_points))
+    edep_sparse = scipy.sparse.lil_matrix((sample.cdc.n_events,
+                                           sample.cdc.geom.n_points))
+    sig_hit_sparse = scipy.sparse.lil_matrix((sample.cdc.n_events,
+                                              sample.cdc.geom.n_points))
     for evt in all_events:
-        meas = sample.cdc.get_events(evt)[sample.cdc.edep_name]
         # Get the wire_ids of the hit data
         wire_ids = sample.cdc.get_hit_vols(evt, unique=False)
         # Get the summed energy deposition
         edep = np.zeros((sample.cdc.geom.n_points))
-        np.add.at(edep, wire_ids, meas)
+        edep_meas = sample.cdc.get_events(evt)[sample.cdc.edep_name]
+        np.add.at(edep, wire_ids, edep_meas)
         # Assign this to the sparse array
-        edep_sparse[evt,:] = edep
+        edep_sparse[evt, :] = edep
+        # Check if there is a signal on this hit
+        sig_hit = np.zeros((sample.cdc.geom.n_points))
+        sig_hit_meas = sample.cdc.get_events(evt)[sample.cdc.hit_type_name] == \
+                      sample.cdc.signal_coding
+        np.logical_or.at(sig_hit, wire_ids, sig_hit_meas)
+        # Assign this to the sparse array
+        sig_hit_sparse[evt, :] = sig_hit
     # Sort by hit type name to keep signal hits preferentialy
     if sort_hits:
-        sample.cdc.sort_hits(_sort_name, ascending=False, reset_index=True)
-    hit_indexes = sample.cdc.get_measurement(sample.cdc.hits_index_name, all_events)
+        sample.cdc.sort_hits(sample.cdc.time_name, reset_index=True)
+    hit_indexes = sample.cdc.get_measurement(sample.cdc.hits_index_name,
+                                             all_events)
     # Remove the hits that are not needed
     sample.cdc.trim_hits(sample.cdc.hits_index_name, values=hit_indexes)
     all_events = np.arange(sample.cdc.n_events)
@@ -230,9 +241,14 @@ def data_remove_coincidence(sample, sort_hits=True):
     # Map the evnt_ids to the minimal continous set
     evnt_ids = np.repeat(np.arange(all_events.size),
                          sample.cdc.event_to_n_hits[all_events])
-    # Force the new edep values onto the sample
-    hit_indexes = sample.cdc.get_measurement(sample.cdc.hits_index_name, all_events).astype(int)
-    sample.cdc.data[sample.cdc.edep_name][hit_indexes] = edep_sparse[evnt_ids, wire_ids].toarray()
+    # Force the new edep and is_sig values onto the sample
+    hit_indexes = \
+        sample.cdc.get_measurement(sample.cdc.hits_index_name,
+                                   all_events).astype(int)
+    sample.cdc.data[sample.cdc.edep_name][hit_indexes] = \
+            edep_sparse[evnt_ids, wire_ids].toarray()
+    sample.cdc.data[sample.cdc.hit_type_name][hit_indexes] = \
+            sig_hit_sparse[evnt_ids, wire_ids].toarray()
 
 def data_get_measurment_and_neighbours(hit_sample, measurement, events=None, digitize=False, bins=None,
                                        **kwargs):
