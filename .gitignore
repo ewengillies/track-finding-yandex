@@ -1,3 +1,6 @@
+# All vim stuff
+\.*.sw?
+
 *.py[cod]
 
 # C extensions
