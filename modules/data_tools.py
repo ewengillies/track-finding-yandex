@@ -41,6 +41,8 @@ def data_get_cuts(needed_cuts, signal=False):
                 "CTH":None}
         return cuts
     # This is getting more complicated than its worth...
+    up_time = {"CDC" : 1620,
+               "CTH" : 1170}
     for key, time_name in zip(geoms, t_names):
         prefix = key +"Hit.f"
         time_name = prefix + time_name
@@ -51,7 +53,7 @@ def data_get_cuts(needed_cuts, signal=False):
                 cuts[key][key_cut] = "{}Good{} == 1".format(prefix, key_cut)
         # Here are some timing cuts
         for key_time in ["500", "700"]:
-            cuts[key][key_time] = "{} < 1620 && ".format(time_name)+\
+            cuts[key][key_time] = "{} < {} && ".format(time_name, up_time[key])+\
             "{} > {}".format(time_name, key_time)
     for geo in geoms:
         cuts[geo] = " && ".join([cuts[geo].get(cut, "1 == 1")

@@ -240,14 +240,14 @@ class FlatHits(object):
                     # event so each hit has the value corresponding to its
                     # event.
                     else:
+                        print(branch, event_data.dtype[branch])
                         # Check the length
                         data_length = len(event_data)
                         event_data = event_data[branch][self.hits_to_events]
                 else:
                     event_data = event_data[branch]
                 # Check that the length of the array makes sense
-                assert (data_length == self.n_hits) or\
-                       (data_length == self.n_events),\
+                assert data_length in (self.n_hits, self.n_events),\
                        "ERROR: The length of the data in the requested \n"+\
                        "branch " + branch + " is not the length of the \n"+\
                        "number of events or the number of hits.\n"+\
