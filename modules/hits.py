@@ -212,56 +212,15 @@ class FlatHits(object):
         _ = self._check_for_branches(path, tree, branches)
         # Grab the branches one by one to save on memory
         data_columns = []
+        # TODO absorb event loading limit into selection
         for branch in branches:
-            # Count the number of entries to grab
-            #if self.use_evt_idx:
-            #    n_entries = sum(self.event_to_n_hits[:self.n_events])
-            #else:
-            #    n_entries = self.n_events
-            # TODO absorb event loading limit into selection
             # Grab the branch
-            event_data = root2array(path, treename=tree, \
+            event_data = root2array(path, treename=tree,
                                     branches=[branch],
                                     selection=self.selection)
-            # If we know the number of hits and events, require the branch is as
-            # long as one of these
-            if (self.n_hits is not None) and (self.n_events is not None):
-                # Record the number of entries
-                data_length = len(event_data)
-                # Deal with variables defined once per event
-                if data_length == self.n_events:
-                    # Concatonate the branch if it is an array of lists, i.e. if
-                    # it is defined for every hit
-                    if event_data.dtype[branch] == object:
-                        event_data = np.concatenate(event_data[branch])
-                        # Check that the right number of hits are defined
-                        data_length = len(event_data)
-                    # Otherwise assume it is defined event-wise, stretch it by
-                    # event so each hit has the value corresponding to its
-                    # event.
-                    else:
-                        print(branch, event_data.dtype[branch])
-                        # Check the length
-                        data_length = len(event_data)
-                        event_data = event_data[branch][self.hits_to_events]
-                else:
-                    event_data = event_data[branch]
-                # Check that the length of the array makes sense
-                assert data_length in (self.n_hits, self.n_events),\
-                       "ERROR: The length of the data in the requested \n"+\
-                       "branch " + branch + " is not the length of the \n"+\
-                       "number of events or the number of hits.\n"+\
-                       "Entries in branch = {}\n".format(data_length)+\
-                       "Hits in sample = {}\n".format(self.n_hits)+\
-                       "Events in sample = {}\n".format(self.n_events)
-
-                # Add this branch
-                data_columns.append(event_data)
-            # If we do not know the number of hits and events, assume its
-            # defined hit-wise
-            else:
-                data_columns.append(np.concatenate(event_data[branch]))
-        # Return
+            # Append the data
+            data_columns.append(event_data[branch])
+        # Return the columns
         return data_columns
 
     def _generate_event_to_n_hits_table(self, path, tree):
