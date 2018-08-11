@@ -197,7 +197,7 @@ def test_get_measurement(cdc_hits, cdc_meas_params):
     # Load the reference data
     ref_data = np.load(ref_file)["array"]
     # Check its all the same
-    np.testing.assert_allclose(sample_data, ref_data)
+    np.testing.assert_allclose(sample_data, ref_data, err_msg=var)
 
 # TEST CTH HITS ################################################################
 

@@ -11,9 +11,9 @@ import scipy
 from root_numpy import root2array, list_branches
 from cylinder import CDC, CTH
 
-# TODO don't cache row and index data, just cache the mapping and evaluate it
-#      when needed
+# TODO create event selection via hit selection on input
 # TODO swith to pandas
+# TODO improve adding two samples together
 # TODO deal with empty CTH events or empty CDC events
 # TODO improve CTH tigger logic to have time window
 # TODO improve CTH hits to sum over 10ns bins
@@ -157,7 +157,7 @@ class FlatHits(object):
         # Finialize the data into the data structures
         self._finalize_data(path, tree)
 
-    def _import_root_file(self, path, tree, branches):
+    def _import_root_file(self, path, tree, branches, single_perc=True):
         """
         This wraps root2array to protect the user from importing non-existant
         branches, which cause the program to hang without any error messages
@@ -173,11 +173,16 @@ class FlatHits(object):
         check_for_branches(path, tree, branches)
         # TODO absorb event loading limit into selection
         # Grab the branch
-        event_data = root2array(path, treename=tree,
-                                branches=branches,
-                                selection=self.selection)
-        # Append the data
-        return [event_data[branch] for branch in branches]
+        _data = []
+        for branch in branches:
+            _branch_data = root2array(path, treename=tree,
+                                      branches=[branch],
+                                      selection=self.selection)[branch]
+            if _branch_data.dtype == np.float64 and single_perc:
+                _branch_data = _branch_data.astype(np.float32)
+            _data += [_branch_data]
+        # Unstructure the array to just return a list of arrays
+        return _data
 
     # TODO depreciate
     def _generate_event_to_n_hits_table(self, path, tree):
@@ -280,7 +285,7 @@ class FlatHits(object):
         Zip up the data into a rec array if this is the highest level class of
         this instance
         """
-        # Ensure the branch names are unique 
+        # Ensure the branch names are unique
         self._branches = sorted(list(set(self._branches)))
         # Sort the empty branch by keys
         self._e_branch_dict = OrderedDict(sorted(self._e_branch_dict.items()))

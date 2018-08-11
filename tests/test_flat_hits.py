@@ -25,16 +25,12 @@ BRANCHES = ['Track.fStartMomentum.fX',
             'Track.fStartMomentum.fY',
             'Track.fStartMomentum.fZ']
 # Turn this on if we want to regenerate the reference sample
-GENERATE_REFERENCE = False
+GENERATE_REFERENCE = True
 # Number of branches expected for reference samples
 N_BRANCHES = {}
 N_BRANCHES["CDC"] = 36
 N_BRANCHES["CTH"] = 34
 
-# TODO
-# test import subset of events
-# test signal and background functions on added sample
-# test added sample
 
 # HELPER FUNCTIONS #############################################################
 
