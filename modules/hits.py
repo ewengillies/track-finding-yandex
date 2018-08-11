@@ -95,13 +95,14 @@ class FlatHits(object):
                  path,
                  tree='COMETEventsSummary',
                  selection=None,
+                 first_event=0,
+                 n_events=None,
                  prefix="CDCHit.f",
                  branches=None,
                  empty_branches=None,
                  hit_type_name="IsSig",
                  key_name="EventNumber",
-                 signal_coding=True,
-                 n_evts=None):
+                 signal_coding=True):
         # TODO fill in docs
         """
         """
@@ -147,12 +148,17 @@ class FlatHits(object):
         self.hits_to_events = None
         self.event_to_hits = None
         self.event_to_n_hits = None
-        # Get the number of hits for each event
-        self._generate_event_to_n_hits_table(path, tree)
+        # Get the number of hits for each event, limiting this lookup table if
+        # we only want a subset of events
+        self._first_hit = None
+        self._generate_event_to_n_hits_table(path, tree, first_event, n_events)
         # Fill the look up tables
         self._generate_lookup_tables()
         # Fill the counters
         self._generate_counters()
+        print(sum(self.event_to_n_hits))
+        print(len(self.hits_to_events))
+        print(self._first_hit)
 
         # Finialize the data into the data structures
         self._finalize_data(path, tree)
@@ -171,21 +177,28 @@ class FlatHits(object):
             branches = [branches]
         # Check the branches we want are there
         check_for_branches(path, tree, branches)
-        # TODO absorb event loading limit into selection
-        # Grab the branch
+        # Temporary variable to index the last hit
+        _l_hit = self._first_hit + self.n_hits
+        # Import all the data
         _data = []
         for branch in branches:
-            _branch_data = root2array(path, treename=tree,
-                                      branches=[branch],
-                                      selection=self.selection)[branch]
-            if _branch_data.dtype == np.float64 and single_perc:
-                _branch_data = _branch_data.astype(np.float32)
-            _data += [_branch_data]
-        # Unstructure the array to just return a list of arrays
+            # Import the branch
+            _b_data = root2array(path, treename=tree,
+                                 branches=[branch],
+                                 selection=self.selection)
+            # Unstructure the data and limit the number of hits
+            _b_data = _b_data[branch][self._first_hit:_l_hit]
+            # Convert to single percision if needed
+            if _b_data.dtype == np.float64 and single_perc:
+                _b_data = _b_data.astype(np.float32)
+            # Cache the column to return it
+            _data += [_b_data]
+        # Return a list of arrays
         return _data
 
     # TODO depreciate
-    def _generate_event_to_n_hits_table(self, path, tree):
+    def _generate_event_to_n_hits_table(self, path, tree,
+                                        first_event=0, n_events=None):
         """
         Creates look up tables to map from event index to number of hits from
         the root files
@@ -202,8 +215,15 @@ class FlatHits(object):
             "Event index named {} not sorted".format(self.key_name)
         # Return the number of hits in each event
         _, event_to_n_hits = np.unique(event_data, return_counts=True)
-        # Trim to the requested number of events
+        # Set the internal table to this value
         self.event_to_n_hits = event_to_n_hits
+        # Trim this lookup table to only include events of interest
+        # the events
+        self._first_hit = np.sum(self.event_to_n_hits[:first_event])
+        self.event_to_n_hits = self.event_to_n_hits[first_event:]
+        if n_events is not None:
+            # If we want a subset of events, then import a subset
+            self.event_to_n_hits = self.event_to_n_hits[:n_events]
 
     # TODO depreciate
     def _generate_lookup_tables(self):
@@ -299,11 +319,14 @@ class FlatHits(object):
         # Remember the order of these branches
         self.all_branches = self._branches
         # Add the empty data that will be filled
+        print(self.n_hits)
         self.data += [np.zeros(self.n_hits).astype(typ)
                       for typ in self._e_branch_dict.values()]
         # Set the names of all branches
         self.all_branches = self._branches + list(self._e_branch_dict.keys())
         # Reset the data as a recarray
+        for _data, _branch in zip(self.data, self.all_branches):
+            print(_data.shape, _branch)
         self.data = np.rec.fromarrays(self.data, names=(self.all_branches))
         self._generate_indexes()
 

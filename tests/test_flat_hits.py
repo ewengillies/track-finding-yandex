@@ -5,6 +5,7 @@ from __future__ import print_function
 import sys
 import pytest
 import numpy as np
+from numpy.testing import assert_allclose
 sys.path.insert(0, "../modules")
 from root_numpy import list_branches
 import hits
@@ -25,7 +26,7 @@ BRANCHES = ['Track.fStartMomentum.fX',
             'Track.fStartMomentum.fY',
             'Track.fStartMomentum.fZ']
 # Turn this on if we want to regenerate the reference sample
-GENERATE_REFERENCE = True
+GENERATE_REFERENCE = False
 # Number of branches expected for reference samples
 N_BRANCHES = {}
 N_BRANCHES["CDC"] = 36
@@ -75,7 +76,7 @@ def check_data(sample, reference_data):
     for col in sample.data.dtype.names:
         new_data = sample.data[col]
         ref_data = reference_data[col]
-        np.testing.assert_allclose(new_data, ref_data, err_msg=col)
+        assert_allclose(new_data, ref_data, err_msg=col)
 
 def check_filter(filtered_hits, variable, values, greater, less, invert):
     """
@@ -312,6 +313,87 @@ def test_flat_hits_sel(flat_hits_sel):
             error_message = "Relation symbol {} not supported".format(relation)
             raise AssertionError(error_message)
 
+# SAMPLE SUBSET IMPORT #########################################################
+
+@pytest.fixture(params=[
+    # Parameterize the array construction
+    # first_event, n_events
+    (0, None),
+    (10, None),
+    (10, 5)
+    ])
+def cstrct_hits_params_subset(request, cstrct_hits_params):
+    """
+    Parameterize the flat hit parameters with empty branches
+    """
+    file, geom, branch = cstrct_hits_params
+    first_event, n_events = request.param
+    return file, geom, branch, first_event, n_events
+
+@pytest.fixture()
+def flat_hits_subset(cstrct_hits_params_subset):
+    """
+    Construct the base flat hits object with some selections
+    """
+    # Unpack the parameters
+    file, geom, branch, first_event, n_events = cstrct_hits_params_subset
+    tree, prefix = NAMES[geom]
+    root_file = file + ".root"
+    # Load all the branches
+    if branch == "all":
+        branch = filter_branches(list_branches(root_file, treename=tree))
+    # Load the file
+    sample_all = hits.FlatHits(root_file,
+                               tree=tree,
+                               prefix=prefix,
+                               branches=branch)
+    sample_sub = hits.FlatHits(root_file,
+                               tree=tree,
+                               prefix=prefix,
+                               first_event=first_event,
+                               n_events=n_events,
+                               branches=branch)
+    return sample_all, sample_sub, first_event, n_events
+
+def test_flat_hits_subset(flat_hits_subset):
+    """
+    Test that importing empty branches works fine
+    """
+    # Unpack the values
+    sample_all, sample_sub, f_event, n_events = flat_hits_subset
+    # Get information about the whole sample
+    all_event_keys, all_n_hits = \
+        np.unique(sample_all.get_events()[sample_all.key_name],
+                  return_counts=True)
+    all_n_events = all_event_keys.shape[0]
+    # Get the expected number of events and index of last event
+    if n_events is None:
+        n_events = all_n_events - f_event
+    l_event = f_event + n_events
+    # Get information about the subsample
+    sub_event_keys, sub_n_hits = \
+        np.unique(sample_sub.get_events()[sample_sub.key_name],
+                  return_counts=True)
+    sub_n_events = sub_event_keys.shape[0]
+    # Ensure the right number of events are returned
+    assert sub_n_events == n_events,\
+        "Expected {} events, found {}".format(n_events, sub_n_events)
+    # Ensure that the correct first event was returned
+    assert sub_event_keys[0] == all_event_keys[f_event],\
+        "Expected first event key {} found {}".format(all_event_keys[f_event],
+                                                      sub_event_keys[0])
+    # Ensure the correct number of hits are returned
+    sub_n_hits = np.sum(sub_n_hits)
+    expect_n_hits = np.sum(all_n_hits[f_event:l_event])
+    assert sub_n_hits == expect_n_hits,\
+        "Expected {} hits, found {}".format(expect_n_hits, sub_n_hits)
+    # Ensure the event data looks the same
+    data_all = sample_all.get_events(events=np.arange(f_event, l_event))
+    data_sub = sample_sub.get_events()
+    for col in data_sub.dtype.names:
+        if ("event_index" not in col) and ("hits_index" not in col):
+            assert_allclose(data_all[col], data_sub[col], err_msg=col)
+
 # EMPTY BRANCH IMPORT ##########################################################
 
 @pytest.fixture(params=[
@@ -356,9 +438,9 @@ def test_flat_hits_empty(flat_hits_empty):
     """
     sample, empty = flat_hits_empty
     for empty_branch in empty:
-        np.testing.assert_allclose(sample.data[empty_branch],
-                                   np.zeros_like(sample.data[empty_branch]),
-                                   err_msg=empty_branch)
+        assert_allclose(sample.data[empty_branch],
+                        np.zeros_like(sample.data[empty_branch]),
+                        err_msg=empty_branch)
 
 # TEST GET EVENT FUCNTIONS #####################################################
 
@@ -399,7 +481,7 @@ def test_get_event(events_and_ref_data):
     sample, ref_data, events = events_and_ref_data
     event_data = sample.get_events(events)
     for branch in event_data.dtype.names:
-        np.testing.assert_allclose(ref_data[branch], event_data[branch])
+        assert_allclose(ref_data[branch], event_data[branch])
 
 def test_get_signal_hits(events_and_ref_data):
     """
@@ -410,7 +492,7 @@ def test_get_signal_hits(events_and_ref_data):
     event_data = sample.get_signal_hits(events)
     test_ref = ref_data[ref_data[sample.hit_type_name] == sample.signal_coding]
     for branch in event_data.dtype.names:
-        np.testing.assert_allclose(test_ref[branch], event_data[branch])
+        assert_allclose(test_ref[branch], event_data[branch])
 
 def test_get_background_hits(events_and_ref_data):
     """
@@ -421,7 +503,7 @@ def test_get_background_hits(events_and_ref_data):
     event_data = sample.get_background_hits(events)
     test_ref = ref_data[ref_data[sample.hit_type_name] != sample.signal_coding]
     for branch in event_data.dtype.names:
-        np.testing.assert_allclose(test_ref[branch], event_data[branch])
+        assert_allclose(test_ref[branch], event_data[branch])
 
 @pytest.mark.parametrize("sort_branch, ascending", [
     (BRANCHES[0], True),
@@ -444,11 +526,9 @@ def test_sort_hits(events_and_ref_data, sort_branch, ascending):
     for branch in event_data.dtype.names:
         if ("hits_index" not in branch) and ("IsSig" not in branch):
             error_msg = "Branch {} not sorted".format(branch)
-            print(test_ref[sort_branch])
-            print(event_data[sort_branch])
-            np.testing.assert_allclose(test_ref[branch],
-                                       event_data[branch],
-                                       err_msg=error_msg)
+            assert_allclose(test_ref[branch],
+                            event_data[branch],
+                            err_msg=error_msg)
 
 # TEST FILTERS  ################################################################
 
