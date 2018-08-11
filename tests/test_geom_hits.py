@@ -65,10 +65,11 @@ def cdc_hits(cstrct_cdc_hits_params):
     Construct the base cdc hits object
     """
     # Unpack the parameters
-    file, geom, branches = cstrct_cdc_hits_params
+    file, geom, rqst_branches = cstrct_cdc_hits_params
     tree, prefix = NAMES[geom]
     root_file = file + ".root"
     # Load all the branches
+    branches = rqst_branches
     if branches == "all":
         branches = filter_branches(list_branches(root_file, treename=tree))
     # Load the file
@@ -78,7 +79,7 @@ def cdc_hits(cstrct_cdc_hits_params):
                           branches=branches)
     # Randomly assign every 5th hit as a signal hit
     sample.data[sample.hit_type_name][::5] = bool(sample.signal_coding)
-    return sample, file, geom
+    return sample, file, geom, rqst_branches
 
 @pytest.fixture()
 def cdc_hits_and_ref(cdc_hits):
@@ -86,7 +87,7 @@ def cdc_hits_and_ref(cdc_hits):
     Package the hits and the reference data together
     """
     # Unpack the parameters
-    sample, file, geom = cdc_hits
+    sample, file, geom, rqst_branches = cdc_hits
     # Check that it is the same as the first time we loaded in this data
     reference_file = file+"_"+geom+"_hits.npz"
     # Generate the reference here if needed
@@ -97,14 +98,28 @@ def cdc_hits_and_ref(cdc_hits):
                            N_BRANCHES[geom])
     reference_data = np.load(reference_file)["array"]
     # Return the information
-    return sample, reference_data
+    return sample, reference_data, rqst_branches
+
+def test_all_cdc_branches_present(cdc_hits_and_ref):
+    """
+    Ensure we did not drop any branches unintentionally
+    """
+    # Unpack the values
+    sample, reference_data, rqst_branches = cdc_hits_and_ref
+    # Ensure we have the right number of branches if we requested all of them
+    if rqst_branches == 'all':
+        ref_branches = reference_data.dtype.names
+        smp_branches = sample.data.dtype.names
+        miss = [b for b in ref_branches if b not in smp_branches]
+        assert not miss,\
+            "Requested all branches, but did not find {}".format("\n".join(miss))
 
 def test_cdc_sample_columns(cdc_hits_and_ref):
     """
     Ensure the data columns are the same
     """
     # Unpack the information
-    sample, reference_data = cdc_hits_and_ref
+    sample, reference_data, _ = cdc_hits_and_ref
     # Ensure column names are subset of reference names
     check_columns(sample, reference_data)
 
@@ -113,7 +128,7 @@ def test_cdc_sample_data(cdc_hits_and_ref):
     Ensure the data columns are the same
     """
     # Unpack the information
-    sample, reference_data = cdc_hits_and_ref
+    sample, reference_data, _ = cdc_hits_and_ref
     # Ensure all the data is the same
     check_data(sample, reference_data)
 
@@ -138,7 +153,7 @@ def test_remove_coincidence(cdc_hits):
     Check if we correctly removed the coincidence
     """
     # Unpack the parameters
-    sample, file, geom = cdc_hits
+    sample, file, geom, _ = cdc_hits
     # Get the reference file
     ref_file = file+"_"+geom+"_noconicidence.npz"
     # Get the sample data
@@ -161,7 +176,7 @@ def test_get_measurement(cdc_hits, cdc_meas_params):
     Test the crucial get_measurment function for CDC hits
     """
     # Unpack the parameters
-    sample, file, geom = cdc_hits
+    sample, file, geom, _ = cdc_hits
     var, events, shift, default, only_hits, flatten, index = cdc_meas_params
     # Get the reference file
     ref_file = file + "_" + geom + "_getmeasdata_"+str(index)+".npz"
@@ -192,10 +207,11 @@ def cth_hits(cstrct_cth_hits_params):
     Construct the base cth hits object
     """
     # Unpack the parameters
-    file, geom, branches = cstrct_cth_hits_params
+    file, geom, rqst_branches = cstrct_cth_hits_params
     tree, prefix = NAMES[geom]
     root_file = file + ".root"
     # Load all the branches
+    branches = rqst_branches
     if branches == "all":
         branches = filter_branches(list_branches(root_file, treename=tree))
     # Load the file
@@ -205,7 +221,7 @@ def cth_hits(cstrct_cth_hits_params):
                           branches=branches)
     # Randomly assign every 5th hit as a signal hit
     sample.data[sample.hit_type_name][::5] = bool(sample.signal_coding)
-    return sample, file, geom
+    return sample, file, geom, rqst_branches
 
 @pytest.fixture()
 def cth_hits_and_ref(cth_hits):
@@ -213,7 +229,7 @@ def cth_hits_and_ref(cth_hits):
     Package the hits and the reference data together
     """
     # Unpack the parameters
-    sample, file, geom = cth_hits
+    sample, file, geom, rqst_branches = cth_hits
     # Check that it is the same as the first time we loaded in this data
     reference_file = file+"_"+geom+"_hits.npz"
     # Generate the reference here if needed
@@ -224,14 +240,28 @@ def cth_hits_and_ref(cth_hits):
                            N_BRANCHES[geom])
     reference_data = np.load(reference_file)["array"]
     # Return the information
-    return sample, reference_data
+    return sample, reference_data, rqst_branches
+
+def test_all_cth_branches_present(cth_hits_and_ref):
+    """
+    Ensure we did not drop any branches unintentionally
+    """
+    # Unpack the values
+    sample, reference_data, rqst_branches = cth_hits_and_ref
+    # Ensure we have the right number of branches if we requested all of them
+    if rqst_branches == 'all':
+        ref_branches = reference_data.dtype.names
+        smp_branches = sample.data.dtype.names
+        miss = [b for b in ref_branches if b not in smp_branches]
+        assert not miss,\
+            "Requested all branches, but did not find {}".format("\n".join(miss))
 
 def test_cth_sample_columns(cth_hits_and_ref):
     """
     Ensure the data columns are the same
     """
     # Unpack the information
-    sample, reference_data = cth_hits_and_ref
+    sample, reference_data, _ = cth_hits_and_ref
     # Ensure column names are subset of reference names
     check_columns(sample, reference_data)
 
@@ -240,7 +270,7 @@ def test_cth_sample_data(cth_hits_and_ref):
     Ensure the data columns are the same
     """
     # Unpack the information
-    sample, reference_data = cth_hits_and_ref
+    sample, reference_data, _ = cth_hits_and_ref
     # Ensure all the data is the same
     check_data(sample, reference_data)
 
@@ -250,7 +280,7 @@ def test_cth_get_events(cth_hits, hodoscope):
     Check the cth can distinguish the up and down hodoscopes well
     """
     # Unpack the information
-    sample, file, geom = cth_hits
+    sample, file, geom, _ = cth_hits
     # Check that it is the same as the first time we loaded in this data
     reference_file = file+"_"+geom+"_getevents_"+hodoscope+".npz"
     # Generate the reference here if needed

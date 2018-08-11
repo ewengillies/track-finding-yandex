@@ -187,10 +187,11 @@ def flat_hits(cstrct_hits_params):
     Construct the base flat hits object
     """
     # Unpack the parameters
-    file, geom, branches = cstrct_hits_params
+    file, geom, rqst_branches = cstrct_hits_params
     tree, prefix = NAMES[geom]
     root_file = file + ".root"
     # Load all the branches
+    branches = rqst_branches
     if branches == "all":
         branches = filter_branches(list_branches(root_file, treename=tree))
     # Load the file
@@ -200,7 +201,7 @@ def flat_hits(cstrct_hits_params):
                            branches=branches)
     # Assign every 5th hit as signal
     sample.data[sample.hit_type_name][::5] = bool(sample.signal_coding)
-    return sample, file, geom
+    return sample, file, geom, rqst_branches
 
 @pytest.fixture()
 def flat_hits_and_ref(flat_hits):
@@ -208,7 +209,7 @@ def flat_hits_and_ref(flat_hits):
     Package the hits and the reference data together
     """
     # Unpack the parameters
-    sample, file, geom = flat_hits
+    sample, file, geom, rqst_branches = flat_hits
     # Check that it is the same as the first time we loaded in this data
     reference_file = file+"_"+geom+".npz"
     # Generate the referece file if needed
@@ -220,14 +221,28 @@ def flat_hits_and_ref(flat_hits):
                            N_BRANCHES[geom])
     reference_data = np.load(reference_file)["array"]
     # Return the information
-    return sample, reference_data
+    return sample, reference_data, rqst_branches
+
+def test_all_branches_present(flat_hits_and_ref):
+    """
+    Ensure we did not drop any branches unintentionally
+    """
+    # Unpack the values
+    sample, reference_data, rqst_branches = flat_hits_and_ref
+    # Ensure we have the right number of branches if we requested all of them
+    if rqst_branches == 'all':
+        ref_branches = reference_data.dtype.names
+        smp_branches = sample.data.dtype.names
+        miss = [b for b in ref_branches if b not in smp_branches]
+        assert not miss,\
+            "Requested all branches, but did not find {}".format("\n".join(miss))
 
 def test_sample_columns(flat_hits_and_ref):
     """
     Ensure the data columns are the same
     """
     # Unpack the information
-    sample, reference_data = flat_hits_and_ref
+    sample, reference_data, _ = flat_hits_and_ref
     # Ensure column names are subset of reference names
     check_columns(sample, reference_data)
 
@@ -236,7 +251,7 @@ def test_sample_data(flat_hits_and_ref):
     Ensure the data columns are the same
     """
     # Unpack the information
-    sample, reference_data = flat_hits_and_ref
+    sample, reference_data, _ = flat_hits_and_ref
     # Ensure all the data is the same
     check_data(sample, reference_data)
 
@@ -367,7 +382,7 @@ def events_and_ref_data(flat_hits, event_params):
     Return a subsample of events and their reference data
     """
     # Get the event data from the file
-    sample, file, geom = flat_hits
+    sample, file, geom, _ = flat_hits
     file_index, events = event_params
     # Get the reference file
     ref_file = file + "_" + geom + "_eventdata_"+str(file_index)+".npz"
@@ -457,7 +472,7 @@ def test_filtered_hits(flat_hits, filter_params):
     Keep the hits satisfying this criteria
     """
     # Unpack the arguments
-    sample, _, geom = flat_hits
+    sample, _, geom, _ = flat_hits
     variable, values, greater, less, invert = filter_params
     variable = NAMES[geom][1] + variable
     # Get the relevant hits to keep
@@ -476,7 +491,7 @@ def test_trim_hits(flat_hits, filter_params):
     Keep the hits satisfying this criteria
     """
     # Unpack the arguments
-    sample, _, geom = flat_hits
+    sample, _, geom, _ = flat_hits
     variable, values, greater, less, invert = filter_params
     variable = NAMES[geom][1] + variable
     # Get the relevant hits to keep

@@ -5,10 +5,12 @@ Notation used below:
  - wire_index is the index of wire in the layer
 """
 from __future__ import print_function
+from abc import ABC, abstractmethod
+from collections import OrderedDict
 import numpy as np
+import scipy
 from root_numpy import root2array, list_branches
 from cylinder import CDC, CTH
-import scipy
 
 # TODO clean up data importing to only call data import ONCE
 # TODO swith to pandas
@@ -136,11 +138,16 @@ class FlatHits(object):
         self.n_events = None
 
         # Ensure we have a list type of branches and empty branches
-        self._empty_branches = _return_branches_as_list(empty_branches)
+        _empty_branches = _return_branches_as_list(empty_branches)
         self._branches = _return_branches_as_list(branches)
+        # Add each empty branch to a dictonary that maps to the branches data
+        # type
+        self._e_branch_dict = {brnch : np.float64 for brnch in _empty_branches}
         # Add the branches as we expect
         self._branches += [self.hit_type_name, self.key_name]
-        self._empty_branches += [self.hits_index_name, self.event_index_name]
+        # Add the indexes as integers
+        self._e_branch_dict[self.hits_index_name] = np.int64
+        self._e_branch_dict[self.event_index_name] = np.int64
 
         # Declare out lookup tables
         # TODO depreciate
@@ -175,6 +182,7 @@ class FlatHits(object):
         # Grab the branches one by one to save on memory
         data_columns = []
         # TODO absorb event loading limit into selection
+        # TODO get rid of this loop
         for branch in branches:
             # Grab the branch
             event_data = root2array(path, treename=tree,
@@ -286,11 +294,12 @@ class FlatHits(object):
         Zip up the data into a rec array if this is the highest level class of
         this instance
         """
-        # Ensure the branch names are unique
+        # Ensure the branch names are unique 
         self._branches = sorted(list(set(self._branches)))
-        self._empty_branches = sorted(list(set(self._empty_branches)))
+        # Sort the empty branch by keys
+        self._e_branch_dict = OrderedDict(sorted(self._e_branch_dict.items()))
         # Ensure these lists are mutually exclusive
-        in_both = [ept for ept in self._empty_branches if ept in self._branches]
+        in_both = [b for b in self._e_branch_dict.keys() if b in self._branches]
         assert not in_both, "Column(s) trying to be imported both as an empty"+\
             " branch and as a data branch\n{}".format("\n".join(in_both))
         # Import the branches we expect
@@ -298,19 +307,11 @@ class FlatHits(object):
                                            branches=self._branches)
         # Remember the order of these branches
         self.all_branches = self._branches
-        # Add the empty branches
-        for e_branch in self._empty_branches:
-            # Add the branch name
-            self.all_branches += [e_branch]
-            # Add the branch data
-            if e_branch == self.event_index_name:
-                self.data += [self.hits_to_events]
-            elif e_branch == self.hits_index_name:
-                self.data += [np.arange(self.n_hits)]
-            else:
-                self.data += [np.zeros(self.n_hits)]
+        # Add the empty data that will be filled
+        self.data += [np.zeros(self.n_hits).astype(typ)
+                      for typ in self._e_branch_dict.values()]
         # Set the names of all branches
-        self.all_branches = self._branches + self._empty_branches
+        self.all_branches = self._branches + list(self._e_branch_dict.keys())
         # Reset the data as a recarray
         self.data = np.rec.fromarrays(self.data, names=(self.all_branches))
         self._generate_indexes()
@@ -487,12 +488,7 @@ class FlatHits(object):
         print("Branches available are:")
         print("\n".join(self.all_branches))
 
-# TODO inheret the MutableSequence attributes of the data directly
-#    def __getitem__(self, key)
-#    def __setitem__(self, key)
-#    def __len__(self, key)
-
-class GeomHits(FlatHits):
+class GeomHits(FlatHits, ABC):
     # pylint: disable=too-many-instance-attributes
     # pylint: disable=bad-continuation
     # pylint: disable=relative-import
@@ -504,8 +500,6 @@ class GeomHits(FlatHits):
                  prefix="CDCHit.f",
                  branches=None,
                  empty_branches=None,
-                 row_name="layerID",
-                 idx_name="cellID",
                  edep_name="Charge",
                  time_name="DetectedTime",
                  flat_name="vol_id",
@@ -535,7 +529,11 @@ class GeomHits(FlatHits):
                                                          prefix,
                                                          branches,
                                                          empty_branches)
-        # TODO move flat hits to the end
+        # Define the names of the time and energy depostition columns
+        self.edep_name = prefix + edep_name
+        self.time_name = prefix + time_name
+        branches += [self.edep_name, self.time_name]
+
         # Initialize the base class
         FlatHits.__init__(self,
                           path,
@@ -545,38 +543,11 @@ class GeomHits(FlatHits):
                           prefix=prefix,
                           finalize_data=False,
                           **kwargs)
-
         # Get the geometry flat_IDs
-        self.row_name = self.prefix + row_name
-        self.idx_name = self.prefix + idx_name
         self.flat_name = self.prefix + flat_name
-
         # Get the geometry of the detector
         self.geom = geom
-
-        # Build the flattened ID row
-        geom_column = self._get_geom_flat_ids(path, tree=tree)
-
-        # Add these data to the data list
-        self.data.append(geom_column)
-        self.all_branches.append(self.flat_name)
-
-        # Define the names of the time and energy depostition columns
-        self.edep_name = self.prefix + edep_name
-        self.time_name = self.prefix + time_name
-
-        # Import these, noting this will be ignored if they already exist
-        edep_column = self._import_root_file(path, tree=tree,
-                                             branches=[self.edep_name])
-        time_column = self._import_root_file(path, tree=tree,
-                                             branches=[self.time_name])
-
-        # Add these data to the data list
-        self.data += edep_column
-        self.data += time_column
-        self.all_branches.append(self.edep_name)
-        self.all_branches.append(self.time_name)
-
+        self._e_branch_dict[self.flat_name] = np.uint16
         # Finialize the data if this is the final form
         if finalize_data:
             self._finalize_data()
@@ -587,24 +558,18 @@ class GeomHits(FlatHits):
         this instance and sort by time
         """
         super(GeomHits, self)._finalize_data()
+        # Set the flat id
+        self.data[self.flat_name] = self._get_geom_flat_ids(self.path,
+                                                            tree=self.tree)
         self.sort_hits(self.time_name)
 
+    @abstractmethod
     def _get_geom_flat_ids(self, path, tree):
         """
         Labels each hit by flattened geometry ID to replace the use of volume
         row and volume index
         """
-        # Import the data
-        row_data, idx_data = self._import_root_file(path, tree=tree,
-                                                    branches=[self.row_name,
-                                                              self.idx_name])
-        # Flatten the volume names and IDs to flat_voldIDs
-        flat_ids = np.zeros(self.n_hits)
-        for row, idx, hit in zip(row_data, idx_data, list(range(self.n_hits))):
-            flat_ids[hit] = self.geom.point_lookup[row, idx]
-        # Save this column and name it
-        flat_id_column = flat_ids.astype(int)
-        return flat_id_column
+        pass
 
     def get_measurement(self, events, name):
         """
@@ -783,7 +748,6 @@ class CDCHits(GeomHits):
                           prefix=prefix,
                           finalize_data=False,
                           **kwargs)
-
         # Finialize the data if this is the final form
         if finalize_data:
             self._finalize_data()
@@ -1041,11 +1005,11 @@ class CTHHits(GeomHits):
                           path,
                           tree=tree,
                           prefix=prefix,
-                          row_name=row_name,
-                          idx_name=idx_name,
                           time_name=time_name,
                           finalize_data=False,
                           **kwargs)
+        self.row_name = self.prefix + row_name
+        self.idx_name = self.prefix + idx_name
 
         if finalize_data:
             self._finalize_data()
