@@ -41,17 +41,12 @@ def check_for_branches(path, tree, branches, soft_check=False):
     :param tree: name of tree in root file
     :param branches: required branches
     """
-    # Import one event with all the branches to get the names of the
-    # branches
-    # TODO use list_branches in root2array here
-    dummy_root = root2array(path, treename=tree, start=0, stop=1)
-    # Get the names of the imported branches
-    availible_branches = dummy_root.dtype.names
+    # Get the names of the availible branches
+    availible_branches = list_branches(path, treename=tree)
     # Get the requested branches that are not availible
     bad_branches = list(set(branches) - set(availible_branches))
-    bad_request = len(bad_branches) != 0
     # Otherwise, shut it down if its the wrong length
-    if bad_request:
+    if bad_branches:
         err_msg = "ERROR: The requested branches:\n"+\
                   "\n".join(bad_branches) + "\n are not availible\n"+\
                   "The branches availible are:\n"+"\n".join(availible_branches)
