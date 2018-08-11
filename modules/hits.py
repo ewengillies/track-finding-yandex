@@ -1,6 +1,6 @@
 from __future__ import print_function
 import numpy as np
-from root_numpy import root2array
+from root_numpy import root2array, list_branches
 from cylinder import CDC, CTH
 """
 Notation used below:
@@ -44,7 +44,7 @@ class FlatHits(object):
                  empty_branches=None,
                  hit_type_name="IsSig",
                  key_name="EventNumber",
-                 use_evt_idx=True,
+                 use_evt_idx=True, # TODO remove this
                  signal_coding=1,
                  finalize_data=True,
                  n_evts=None):
@@ -195,7 +195,6 @@ class FlatHits(object):
             empty_branches += [name]
         return branches, empty_branches
 
-
     def _import_root_file(self, path, tree, branches):
         """
         This wraps root2array to protect the user from importing non-existant
@@ -223,6 +222,7 @@ class FlatHits(object):
         # Return the columns
         return data_columns
 
+    # TODO depreciate
     def _generate_event_to_n_hits_table(self, path, tree):
         """
         Creates look up tables to map from event index to number of hits from
@@ -248,6 +248,7 @@ class FlatHits(object):
         # Trim to the requested number of events
         self.event_to_n_hits = event_to_n_hits[:self.n_events]
 
+    # TODO depreciate
     def _generate_lookup_tables(self):
         """
         Generate mappings between hits and events from current event_to_n_hits
@@ -273,6 +274,7 @@ class FlatHits(object):
         # Ensure all indexes in hits to events are integers
         self.hits_to_events = hits_to_events.astype(int)
 
+    # TODO depreciate
     def _generate_counters(self):
         """
         Generate the number of events and number of hits
@@ -280,6 +282,7 @@ class FlatHits(object):
         self.n_hits = len(self.hits_to_events)
         self.n_events = len(self.event_to_n_hits)
 
+    # TODO depreciate
     def _generate_indexes(self):
         '''
         Reset the hit and event indexes
@@ -287,6 +290,7 @@ class FlatHits(object):
         self.data[self.hits_index_name] = np.arange(self.n_hits)
         self.data[self.event_index_name] = self.hits_to_events
 
+    # TODO depreciate
     def _reset_all_internal_data(self):
         """
         Reset all look up tables, indexes, and counts
@@ -298,6 +302,7 @@ class FlatHits(object):
         # Set the indexes
         self._generate_indexes()
 
+    # TODO depreciate
     def _reset_event_to_n_hits(self):
         # Find the hits to remove
         self.event_to_n_hits = np.bincount(self.data[self.event_index_name],
@@ -309,6 +314,7 @@ class FlatHits(object):
         empty_events = np.where(self.event_to_n_hits > 0)[0]
         self._trim_lookup_tables(empty_events)
 
+    # TODO depreciate
     def _trim_lookup_tables(self, events):
         """
         Trim the lookup tables to the given event indexes
@@ -381,6 +387,7 @@ class FlatHits(object):
         """
         self.trim_hits(self.key_name, values=events)
 
+    # TODO test
     def sort_hits(self, variable, ascending=True, reset_index=True):
         """
         Sorts the hits by the given variable inside each event.  By default,
@@ -410,9 +417,12 @@ class FlatHits(object):
         """
         if these_hits is None:
             these_hits = self.get_events()
-        mask = self._get_mask(these_hits=these_hits, variable=variable,
-                              values=values, greater_than=greater_than,
-                              less_than=less_than, invert=invert)
+        mask = self._get_mask(these_hits=these_hits,
+                              variable=variable,
+                              values=values,
+                              greater_than=greater_than,
+                              less_than=less_than,
+                              invert=invert)
         return these_hits[mask]
 
     def trim_hits(self, variable, values=None, greater_than=None,
@@ -421,11 +431,12 @@ class FlatHits(object):
         Keep the hits satisfying this criteria
         """
         # Get the relevant hits to keep
-        mask = self._get_mask(these_hits=self.data, variable=variable,
-                              values=values, greater_than=greater_than,
-                              less_than=less_than, invert=invert)
-        # Remove the hits
-        self.data = self.data[mask]
+        self.data = self.filter_hits(variable, 
+                                     these_hits=self.data, 
+                                     values=values,
+                                     greater_than=greater_than,
+                                     less_than=less_than,
+                                     invert=invert)
         self._reset_event_to_n_hits()
 
     def add_hits(self, hits, event_indexes=None):
@@ -439,6 +450,7 @@ class FlatHits(object):
         self.data.sort(order=[self.event_index_name, self.time_name])
         self._reset_event_to_n_hits()
 
+    # TODO depreciate
     def remove_branch(self, branch_names):
         """
         Remove a branch from the data
@@ -454,6 +466,7 @@ class FlatHits(object):
                 all_names.remove(prefixed_branch)
         self.data = self.data[all_names]
 
+    # TODO depreciate
     def get_other_hits(self, hits):
         """
         Returns the hits from the same event(s) as the given hit list
