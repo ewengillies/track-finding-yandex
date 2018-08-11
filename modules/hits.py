@@ -5,18 +5,16 @@ Notation used below:
  - wire_index is the index of wire in the layer
 """
 from __future__ import print_function
-from abc import ABC, abstractmethod
 from collections import OrderedDict
 import numpy as np
 import scipy
 from root_numpy import root2array, list_branches
 from cylinder import CDC, CTH
 
-# TODO clean up data importing to only call data import ONCE
-# TODO swith to pandas
-# TODO deal with empty CTH events or empty CDC events
 # TODO don't cache row and index data, just cache the mapping and evaluate it
 #      when needed
+# TODO swith to pandas
+# TODO deal with empty CTH events or empty CDC events
 # TODO improve CTH tigger logic to have time window
 # TODO improve CTH hits to sum over 10ns bins
 # TODO improve dealing with coincidence for CDC hits
@@ -103,14 +101,10 @@ class FlatHits(object):
                  hit_type_name="IsSig",
                  key_name="EventNumber",
                  signal_coding=True,
-                 finalize_data=True,
                  n_evts=None):
         # TODO fill in docs
         """
         """
-        # Set the file path and tree name for this sample
-        self.path = path
-        self.tree = tree
         # Column naming and signal labelling conventions
         # The prefix comes before all column names
         self.prefix = prefix
@@ -139,12 +133,14 @@ class FlatHits(object):
         self._branches = _return_branches_as_list(branches)
         # Add each empty branch to a dictonary that maps to the branches data
         # type
-        self._e_branch_dict = {brnch : np.float64 for brnch in _empty_branches}
+        _empty_branches = [b if _is_sequence(b) else (b, np.float32)
+                           for b in _empty_branches]
+        self._e_branch_dict = {b : typ for b, typ in _empty_branches}
         # Add the branches as we expect
         self._branches += [self.hit_type_name, self.key_name]
         # Add the indexes as integers
-        self._e_branch_dict[self.hits_index_name] = np.int64
-        self._e_branch_dict[self.event_index_name] = np.int64
+        self._e_branch_dict[self.hits_index_name] = np.uint32
+        self._e_branch_dict[self.event_index_name] = np.uint32
 
         # Declare out lookup tables
         # TODO depreciate
@@ -158,9 +154,8 @@ class FlatHits(object):
         # Fill the counters
         self._generate_counters()
 
-        # Finialize the data if this is the final form
-        if finalize_data:
-            self._finalize_data()
+        # Finialize the data into the data structures
+        self._finalize_data(path, tree)
 
     def _import_root_file(self, path, tree, branches):
         """
@@ -280,7 +275,7 @@ class FlatHits(object):
         # Set the lookup tables
         self._reset_all_internal_data()
 
-    def _finalize_data(self):
+    def _finalize_data(self, path, tree):
         """
         Zip up the data into a rec array if this is the highest level class of
         this instance
@@ -294,7 +289,7 @@ class FlatHits(object):
         assert not in_both, "Column(s) trying to be imported both as an empty"+\
             " branch and as a data branch\n{}".format("\n".join(in_both))
         # Import the branches we expect
-        self.data = self._import_root_file(self.path, tree=self.tree,
+        self.data = self._import_root_file(path, tree,
                                            branches=self._branches)
         # Remember the order of these branches
         self.all_branches = self._branches
@@ -479,7 +474,7 @@ class FlatHits(object):
         print("Branches available are:")
         print("\n".join(self.all_branches))
 
-class GeomHits(FlatHits, ABC):
+class GeomHits(FlatHits):
     # pylint: disable=too-many-instance-attributes
     # pylint: disable=bad-continuation
     # pylint: disable=relative-import
@@ -495,7 +490,6 @@ class GeomHits(FlatHits, ABC):
                  time_name="DetectedTime",
                  flat_name="vol_id",
                  trig_name="TrigTime",
-                 finalize_data=True,
                  **kwargs):
         """
         This generates hit data in a structured array from an input root file
@@ -523,6 +517,10 @@ class GeomHits(FlatHits, ABC):
         self.edep_name = prefix + edep_name
         self.time_name = prefix + time_name
         branches += [self.edep_name, self.time_name]
+        # Define the flattened indexes of the geometry
+        self.flat_name = prefix + flat_name
+        # Get the geometry of the detector
+        self.geom = geom
 
         # Initialize the base class
         FlatHits.__init__(self,
@@ -531,35 +529,7 @@ class GeomHits(FlatHits, ABC):
                           branches=branches,
                           empty_branches=empty_branches,
                           prefix=prefix,
-                          finalize_data=False,
                           **kwargs)
-        # Get the geometry flat_IDs
-        self.flat_name = self.prefix + flat_name
-        # Get the geometry of the detector
-        self.geom = geom
-        self._e_branch_dict[self.flat_name] = np.uint16
-        # Finialize the data if this is the final form
-        if finalize_data:
-            self._finalize_data()
-
-    def _finalize_data(self):
-        """
-        Zip up the data into a rec array if this is the highest level class of
-        this instance and sort by time
-        """
-        super(GeomHits, self)._finalize_data()
-        # Set the flat id
-        self.data[self.flat_name] = self._get_geom_flat_ids(self.path,
-                                                            tree=self.tree)
-        self.sort_hits(self.time_name)
-
-    @abstractmethod
-    def _get_geom_flat_ids(self, path, tree):
-        """
-        Labels each hit by flattened geometry ID to replace the use of volume
-        row and volume index
-        """
-        pass
 
     def get_measurement(self, events, name):
         """
@@ -708,8 +678,8 @@ class CDCHits(GeomHits):
                  path,
                  tree='COMETEventsSummary',
                  prefix="CDCHit.f",
-                 chan_name="Channel",
-                 finalize_data=True,
+                 branches=None,
+                 flat_name="Channel",
                  time_offset=None,
                  **kwargs):
         """
@@ -727,34 +697,19 @@ class CDCHits(GeomHits):
         :param signal_coding: value in hit_type_name branch that signifies a
                               signal hit
         """
-        # Set the channel name for the flat_ids
-        self.chan_name = prefix + chan_name
+        # Add the flat name to the branches
+        branches = _return_branches_as_list(branches) + [prefix + flat_name]
         # Build the geom hits object
         GeomHits.__init__(self,
                           CDC(),
                           path,
                           tree=tree,
+                          branches=branches,
                           prefix=prefix,
-                          finalize_data=False,
+                          flat_name=flat_name,
                           **kwargs)
-        # Finialize the data if this is the final form
-        if finalize_data:
-            self._finalize_data()
-        self.time_offset = time_offset
-
-    def _get_geom_flat_ids(self, path, tree):
-        """
-        Labels each hit by flattened geometry ID to replace the use of volume
-        row and volume index
-        """
-        # Check if chan_name is present is the root file
-        has_chan = check_for_branches(path, tree,
-                                      branches=[self.chan_name],
-                                      soft_check=True)
-        if has_chan:
-            return self._import_root_file(path, tree,
-                                          branches=[self.chan_name])[0]
-        return super(CDCHits, self)._get_geom_flat_ids(path, tree)
+        # Sort the hits by time
+        self.sort_hits(self.time_name)
 
     def remove_coincidence(self, sort_hits=True):
         """
@@ -969,10 +924,11 @@ class CTHHits(GeomHits):
                  path,
                  tree='COMETEventsSummary',
                  prefix="CTHHit.f",
+                 empty_branches=None,
                  row_name="Channel",
                  idx_name="Counter",
                  time_name="MCPos.fE",
-                 finalize_data=True,
+                 flat_name="vol_id",
                  **kwargs):
         """
         This generates hit data in a structured array from an input root file
@@ -989,39 +945,35 @@ class CTHHits(GeomHits):
         :param signal_coding: value in hit_type_name branch that signifies a
                               signal hit
         """
+        # Add the flat name as an empty branch
+        empty_branches = _return_branches_as_list(empty_branches)
+        empty_branches += [(prefix + flat_name, np.uint16)]
         GeomHits.__init__(self,
                           CTH(),
                           path,
                           tree=tree,
                           prefix=prefix,
+                          flat_name=flat_name,
                           time_name=time_name,
-                          finalize_data=False,
+                          empty_branches=empty_branches,
                           **kwargs)
-        self.row_name = self.prefix + row_name
-        self.idx_name = self.prefix + idx_name
-        if finalize_data:
-            self._finalize_data()
-
-    def _finalize_data(self):
-        """
-        Zip up the data into a rec array if this is the highest level class of
-        this instance and sort by time
-        """
-        super(CTHHits, self)._finalize_data()
-        # Remove passive volumes from the hit data
-        # TODO fix passive volume hack
+        # Define the row and idx name
+        self.data[self.flat_name] = self._get_geom_flat_ids(path,
+                                                            tree,
+                                                            prefix+row_name,
+                                                            prefix+idx_name)
         self.trim_hits(variable=self.flat_name, values=self.geom.fiducial_crys)
+        self.sort_hits(self.time_name)
 
-    def _get_geom_flat_ids(self, path, tree):
+    def _get_geom_flat_ids(self, path, tree, row_name, idx_name):
         """
         Labels each hit by flattened geometry ID to replace the use of volume
         row and volume index
         """
         # Import the data
-        chan_data = self._import_root_file(path, tree=tree,
-                                           branches=[self.row_name])[0]
-        idx_data = self._import_root_file(path, tree=tree,
-                                          branches=[self.idx_name])[0]
+        branches = [row_name, idx_name]
+        chan_data, idx_data = \
+            self._import_root_file(path, tree=tree, branches=branches)
         # Map from volume names to row indexes
         row_data = np.vectorize(self.geom.chan_to_row)(chan_data)
         # Flatten the volume names and IDs to flat_voldIDs
