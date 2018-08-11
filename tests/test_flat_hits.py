@@ -171,6 +171,7 @@ def test_add_branch(good_bad_branches):
         full_branches, empty_branches = _add_name_to_branches(a_file,
                                                               tree,
                                                               branch,
+                                                              "",
                                                               full_branches,
                                                               empty_branches)
     assert full_branches == branches,\
@@ -346,7 +347,8 @@ def test_flat_hits_empty(flat_hits_empty):
     sample, empty = flat_hits_empty
     for empty_branch in empty:
         np.testing.assert_allclose(sample.data[empty_branch],
-                                   np.zeros_like(sample.data[empty_branch]))
+                                   np.zeros_like(sample.data[empty_branch]),
+                                   err_msg=empty_branch)
 
 # TEST GET EVENT FUCNTIONS #####################################################
 
@@ -432,6 +434,8 @@ def test_sort_hits(events_and_ref_data, sort_branch, ascending):
     for branch in event_data.dtype.names:
         if ("hits_index" not in branch) and ("IsSig" not in branch):
             error_msg = "Branch {} not sorted".format(branch)
+            print(test_ref[sort_branch])
+            print(event_data[sort_branch])
             np.testing.assert_allclose(test_ref[branch],
                                        event_data[branch],
                                        err_msg=error_msg)

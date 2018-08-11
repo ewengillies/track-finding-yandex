@@ -13,11 +13,12 @@ import scipy
 # TODO clean up data importing to only call data import ONCE
 # TODO swith to pandas
 # TODO deal with empty CTH events or empty CDC events
-# TODO don't cache row and index data, just cache the mapping and evaluate it 
+# TODO don't cache row and index data, just cache the mapping and evaluate it
 #      when needed
 # TODO improve CTH tigger logic to have time window
 # TODO improve CTH hits to sum over 10ns bins
 # TODO improve dealing with coincidence for CDC hits
+# TODO change all documentation
 
 def _is_sequence(arg):
     """
@@ -40,8 +41,8 @@ def _return_branches_as_list(branches):
     if branches is None:
         branches = []
     elif not _is_sequence(branches):
-        branches = [branches]
-    return branches
+        branches = list(branches)
+    return list(branches)
 
 def check_for_branches(path, tree, branches, soft_check=False, verbose=False):
     """
@@ -70,14 +71,18 @@ def check_for_branches(path, tree, branches, soft_check=False, verbose=False):
         # Otherwise return true
     return True
 
-def _add_name_to_branches(path, tree, name, branches, empty_branches):
+def _add_name_to_branches(path, tree, name, prefix, branches, empty_branches):
     """
     Determine which list of branches to put this variable
     """
+    # Add the prefix
+    if not name.startswith(prefix):
+        name = prefix + branch
     # Check if this file already has one
     has_name = check_for_branches(path, tree,
                                   branches=[name],
                                   soft_check=True)
+    # Check which list to return it to
     if has_name:
         branches = _return_branches_as_list(branches)
         branches += [name]
@@ -98,56 +103,47 @@ class FlatHits(object):
                  empty_branches=None,
                  hit_type_name="IsSig",
                  key_name="EventNumber",
-                 use_evt_idx=True, # TODO remove this
-                 signal_coding=1,
+                 signal_coding=True,
                  finalize_data=True,
                  n_evts=None):
+        # TODO fill in docs
         """
-        Dataset provides an interface to work with MC stored in root format.
-        Results of methods are either numpy.arrays or scipy.sparse objects.
-        Hits are flattened from [event][evt_hits] structure to [all_hits], with
-        look up tables between hits and event stored.
-
-        Additionally, all geometry IDs are flattened from [row][id] to [flat_id]
-
-        :param path: path to rootfile
-        :param tree: name of the tree in root dataset
-        :param branches: branches from root file to import defined for each hit
-        :param evt_branches: branches from root file to import defined for each
-                             event
-        :param hit_type_name: name of the branch that determines hit type
-        :param n_hit_name: name of branch that gives the number of hits in each
-                           event
-        :param signal_coding: value in hit_type_name branch that signifies a
-                              signal hit.  Default is 1
         """
-        # Assumptions about data naming and signal labelling conventions
+        # Set the file path and tree name for this sample
+        self.path = path
+        self.tree = tree
+        # Column naming and signal labelling conventions
+        # The prefix comes before all column names
         self.prefix = prefix
+        # The key name determines the original event of the hit
         self.key_name = self.prefix + key_name
+        # The hit type name denotes if the hit is signal or not
         self.hit_type_name = self.prefix + hit_type_name
-        self.signal_coding = signal_coding
-        self.n_events = n_evts
-        self.use_evt_idx = use_evt_idx
-        self.selection = selection
-        # Set the number of hits, the number of events, and data to None so that
-        # the the next import_root_file knows its the first call
-        self.n_hits, self.data = (None, None)
+        # Each hit by hit ID and by event index, where event index is contiguous
+        # and starts from zero
+        self.hits_index_name = self.prefix + "hits_index"
+        self.event_index_name = self.prefix + "event_index"
 
-        # Ensure we have a list type of branches
-        empty_branches = _return_branches_as_list(empty_branches)
-        branches = _return_branches_as_list(branches)
-        # Append the prefix if it is not provided
-        branches = [self.prefix + branch
-                    if not branch.startswith(self.prefix)
-                    else branch
-                    for branch in branches]
-        # Ensure hit type is imported in branches
-        branches, empty_branches = _add_name_to_branches(path, tree,
-                                                         self.hit_type_name,
-                                                         branches,
-                                                         empty_branches)
+        # The selection controls which hits are imported
+        self.selection = selection
+        # Determines what value of hit type corresponds to a signal
+        self.signal_coding = signal_coding
+
+        # Initialize the data to none, this will be filled later
+        self.data = None
+        # Declare the counters
+        self.n_hits = None
+        self.n_events = None
+
+        # Ensure we have a list type of branches and empty branches
+        self._empty_branches = _return_branches_as_list(empty_branches)
+        self._branches = _return_branches_as_list(branches)
+        # Add the branches as we expect
+        self._branches += [self.hit_type_name, self.key_name]
+        self._empty_branches += [self.hits_index_name, self.event_index_name]
 
         # Declare out lookup tables
+        # TODO depreciate
         self.hits_to_events = None
         self.event_to_hits = None
         self.event_to_n_hits = None
@@ -155,46 +151,8 @@ class FlatHits(object):
         self._generate_event_to_n_hits_table(path, tree)
         # Fill the look up tables
         self._generate_lookup_tables()
-
-        # Declare the counters
-        self.n_hits = None
-        self.n_events = None
         # Fill the counters
         self._generate_counters()
-
-        # Get the hit data we want
-        if branches:
-            data_columns = self._import_root_file(path, tree=tree,
-                                               branches=branches)
-        # Default to empty list
-        else:
-            data_columns = []
-
-        # Label each hit with the number of hits its import key
-        all_key_column = self._import_root_file(path, tree=tree,
-                                                branches=self.key_name)
-
-        # Index each hit by hit ID and by event index
-        self.hits_index_name = self.prefix + "hits_index"
-        self.event_index_name = self.prefix + "event_index"
-        # Index each hit by hit and event
-        event_index_column = self.hits_to_events
-        hits_index_column = np.arange(self.n_hits)
-
-        # Zip it all together in a record array
-        self.all_branches = branches + [self.key_name] +\
-                                       [self.hits_index_name] +\
-                                       [self.event_index_name]
-        self.data = data_columns + all_key_column + \
-                    [hits_index_column] + [event_index_column]
-
-        # Add in the empty branches
-        empty_branches = _return_branches_as_list(empty_branches)
-        # TODO fix hack
-        empty_branches = np.unique(empty_branches)
-        for branch in empty_branches:
-            self.data += [np.zeros(self.n_hits)]
-            self.all_branches += [branch]
 
         # Finialize the data if this is the final form
         if finalize_data:
@@ -240,18 +198,13 @@ class FlatHits(object):
                                 branches=[self.key_name],
                                 selection=self.selection)
         event_data = event_data[self.key_name]
+        # Check the hits are sorted by event
+        assert np.array_equal(event_data, np.sort(event_data)),\
+            "Event index named {} not sorted".format(self.key_name)
         # Return the number of hits in each event
-        if self.use_evt_idx:
-            # Check the hits are sorted by event
-            assert np.array_equal(event_data, np.sort(event_data)),\
-                "Event index named {} not sorted".format(self.key_name)
-            # Return the number of hits in each event
-            _, event_to_n_hits = np.unique(event_data, return_counts=True)
-        else:
-            # Assume number of hits per event is stored already
-            event_to_n_hits = event_data.copy().astype(int)
+        _, event_to_n_hits = np.unique(event_data, return_counts=True)
         # Trim to the requested number of events
-        self.event_to_n_hits = event_to_n_hits[:self.n_events]
+        self.event_to_n_hits = event_to_n_hits
 
     # TODO depreciate
     def _generate_lookup_tables(self):
@@ -333,6 +286,32 @@ class FlatHits(object):
         Zip up the data into a rec array if this is the highest level class of
         this instance
         """
+        # Ensure the branch names are unique
+        self._branches = sorted(list(set(self._branches)))
+        self._empty_branches = sorted(list(set(self._empty_branches)))
+        # Ensure these lists are mutually exclusive
+        in_both = [ept for ept in self._empty_branches if ept in self._branches]
+        assert not in_both, "Column(s) trying to be imported both as an empty"+\
+            " branch and as a data branch\n{}".format("\n".join(in_both))
+        # Import the branches we expect
+        self.data = self._import_root_file(self.path, tree=self.tree,
+                                           branches=self._branches)
+        # Remember the order of these branches
+        self.all_branches = self._branches
+        # Add the empty branches
+        for e_branch in self._empty_branches:
+            # Add the branch name
+            self.all_branches += [e_branch]
+            # Add the branch data
+            if e_branch == self.event_index_name:
+                self.data += [self.hits_to_events]
+            elif e_branch == self.hits_index_name:
+                self.data += [np.arange(self.n_hits)]
+            else:
+                self.data += [np.zeros(self.n_hits)]
+        # Set the names of all branches
+        self.all_branches = self._branches + self._empty_branches
+        # Reset the data as a recarray
         self.data = np.rec.fromarrays(self.data, names=(self.all_branches))
         self._generate_indexes()
 
@@ -375,7 +354,7 @@ class FlatHits(object):
         # Otherwise assume it is a list of events.
         else:
             # Ensure we only get each event once
-            # TODO remove and check that this is fine.  Sorts the event ids 
+            # TODO remove and check that this is fine.  Sorts the event ids
             # before returning them.  This is bad
             if unique:
                 events = np.unique(events)
@@ -434,8 +413,8 @@ class FlatHits(object):
         Keep the hits satisfying this criteria
         """
         # Get the relevant hits to keep
-        self.data = self.filter_hits(variable, 
-                                     these_hits=self.data, 
+        self.data = self.filter_hits(variable,
+                                     these_hits=self.data,
                                      values=values,
                                      greater_than=greater_than,
                                      less_than=less_than,
@@ -553,6 +532,7 @@ class GeomHits(FlatHits):
         branches, empty_branches = _add_name_to_branches(path,
                                                          tree,
                                                          self.trig_name,
+                                                         prefix,
                                                          branches,
                                                          empty_branches)
         # TODO move flat hits to the end
