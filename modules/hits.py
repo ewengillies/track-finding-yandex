@@ -1,13 +1,14 @@
-from __future__ import print_function
-import numpy as np
-from root_numpy import root2array, list_branches
-from cylinder import CDC, CTH
 """
 Notation used below:
  - wire_id is flat enumerator of all wires
  - layer_id is the index of layer
  - wire_index is the index of wire in the layer
 """
+from __future__ import print_function
+import numpy as np
+from root_numpy import root2array, list_branches
+from cylinder import CDC, CTH
+
 def _is_sequence(arg):
     """
     Check if the argument is iterable
