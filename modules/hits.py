@@ -58,6 +58,22 @@ def check_for_branches(path, tree, branches, soft_check=False):
         # Otherwise return true
     return True
 
+def _add_name_to_branches(path, tree, name, branches, empty_branches):
+    """
+    Determine which list of branches to put this variable
+    """
+    # Check if this file already has one
+    has_name = check_for_branches(path, tree,
+                                  branches=[name],
+                                  soft_check=True)
+    if has_name:
+        branches = _return_branches_as_list(branches)
+        branches += [name]
+    else:
+        empty_branches = _return_branches_as_list(empty_branches)
+        empty_branches += [name]
+    return branches, empty_branches
+
 class FlatHits(object):
     # pylint: disable=too-many-instance-attributes
     # pylint: disable=bad-continuation
@@ -114,10 +130,10 @@ class FlatHits(object):
                     else branch
                     for branch in branches]
         # Ensure hit type is imported in branches
-        branches, empty_branches = self._add_name_to_branches(path, tree,
-                                                              self.hit_type_name,
-                                                              branches,
-                                                              empty_branches)
+        branches, empty_branches = _add_name_to_branches(path, tree,
+                                                         self.hit_type_name,
+                                                         branches,
+                                                         empty_branches)
 
         # Declare out lookup tables
         self.hits_to_events = None
@@ -174,22 +190,6 @@ class FlatHits(object):
         # Finialize the data if this is the final form
         if finalize_data:
             self._finalize_data()
-
-    def _add_name_to_branches(self, path, tree, name, branches, empty_branches):
-        """
-        Determine which list of branches to put this variable
-        """
-        # Check if this file already has one
-        has_name = check_for_branches(path, tree,
-                                      branches=[name],
-                                      soft_check=True)
-        if has_name:
-            branches = _return_branches_as_list(branches)
-            branches += [name]
-        else:
-            empty_branches = _return_branches_as_list(empty_branches)
-            empty_branches += [name]
-        return branches, empty_branches
 
     def _import_root_file(self, path, tree, branches):
         """
@@ -541,11 +541,11 @@ class GeomHits(FlatHits):
         # Name the trigger data row
         self.trig_name = prefix + trig_name
         # Add trig name to branches
-        branches, empty_branches = self._add_name_to_branches(path,
-                                                              tree,
-                                                              self.trig_name,
-                                                              branches,
-                                                              empty_branches)
+        branches, empty_branches = _add_name_to_branches(path,
+                                                         tree,
+                                                         self.trig_name,
+                                                         branches,
+                                                         empty_branches)
         # TODO move flat hits to the end
         # Initialize the base class
         FlatHits.__init__(self,

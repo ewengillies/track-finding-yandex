@@ -8,7 +8,7 @@ import numpy as np
 sys.path.insert(0, "../modules")
 from root_numpy import list_branches
 import hits
-from hits import check_for_branches
+from hits import check_for_branches, _add_name_to_branches
 
 # Pylint settings
 # pylint: disable=redefined-outer-name
@@ -27,7 +27,6 @@ BRANCHES = ['Track.fStartMomentum.fX',
 
 # TODO
 # test import subset of events
-# test check branch
 
 # HELPER FUNCTIONS #############################################################
 def filter_branches(branches):
@@ -46,7 +45,7 @@ def filter_branches(branches):
         ret_val = [brch for brch in ret_val if filter_br not in brch]
     return ret_val
 
-# TEST BASIC IMPORT FUNCTIONS ##################################################
+# TEST HELPER FUNCTIONS ########################################################
 
 @pytest.fixture(params=[
     # Parameterize the array construction
@@ -60,6 +59,59 @@ def cstrct_hits_params(request):
     Parameterize the flat hit parameters
     """
     return request.param
+
+@pytest.fixture()
+def good_bad_branches(cstrct_hits_params):
+    """
+    Build some good and bad branch names
+    """
+    # Unpack the parameters
+    file, geom, branches = cstrct_hits_params
+    tree, _ = NAMES[geom]
+    a_file = file + ".root"
+    # Load all the branches
+    if branches == "all":
+        branches = list_branches(a_file, treename=tree)
+    # Return the list of good and bad branches
+    bad_branches = ["garbage" + brch for brch in branches]
+    return branches, bad_branches, a_file, tree
+
+def test_check_branch(good_bad_branches):
+    """
+    Check if testing for the branch in the data works
+    """
+    # Unpack the arguments
+    branches, bad_branches, a_file, tree = good_bad_branches
+    # Check if we can find the branch(es) we expect
+    err_msg = "Did not find expected branches:\n{}".format("\n".join(branches))
+    found_good = check_for_branches(a_file, tree, branches, soft_check=True)
+    assert found_good, err_msg
+    # Check that bad equests are rejected
+    err_msg = "Found non-existant branches:\n{}".format("\n".join(bad_branches))
+    found_bad = check_for_branches(a_file, tree, bad_branches, soft_check=True)
+    assert not found_bad, err_msg
+
+def test_add_branch(good_bad_branches):
+    """
+    Check if testing for the branch in the data works
+    """
+    # Unpack the arguments
+    branches, bad_branches, a_file, tree = good_bad_branches
+    # Check if we can find the branch(es) we expect
+    full_branches = None
+    empty_branches = None
+    for branch in branches + bad_branches:
+        full_branches, empty_branches = _add_name_to_branches(a_file,
+                                                              tree,
+                                                              branch,
+                                                              full_branches,
+                                                              empty_branches)
+    assert full_branches == branches,\
+        "Existing branches not returned correctly\n{}".format("\n".join(branches))
+    assert empty_branches == bad_branches,\
+        "Empty branches not returned correctly\n{}".format("\n".join(bad_branches))
+
+# TEST CONSTRUCTOR AND IMPORT ##################################################
 
 @pytest.fixture()
 def flat_hits(cstrct_hits_params):
@@ -92,27 +144,6 @@ def flat_hits_and_ref(flat_hits):
     reference_data = np.load(reference_file)["array"]
     # Return the information
     return sample, reference_data
-
-def test_check_branch(cstrct_hits_params):
-    """
-    Check if testing for the branch in the data works
-    """
-    # Unpack the parameters
-    file, geom, branches = cstrct_hits_params
-    tree, _ = NAMES[geom]
-    a_file = file + ".root"
-    # Load all the branches
-    if branches == "all":
-        branches = list_branches(a_file, treename=tree)
-    # Check if we can find the branch(es) we expect
-    err_msg = "Did not find expected branches:\n{}".format("\n".join(branches))
-    found_good = check_for_branches(a_file, tree, branches, soft_check=True)
-    assert found_good, err_msg
-    # Check that bad equests are rejected
-    bad_branches = ["garbage" + brch for brch in branches]
-    err_msg = "Found non-existant branches:\n{}".format("\n".join(bad_branches))
-    found_bad = check_for_branches(a_file, tree, bad_branches, soft_check=True)
-    assert not found_bad, err_msg
 
 def test_sample_columns(flat_hits_and_ref):
     """
