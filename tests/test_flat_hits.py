@@ -15,7 +15,7 @@ from hits import check_for_branches, _add_name_to_branches
 
 # Define the verbosity at the global scope
 # test files we will use
-FILES = ["test_file_a"]
+FILES = ["ref_data/test_file_a"]
 # names used for import that belong together
 NAMES = {}
 NAMES["CDC"] = ("CDCHitTree", "CDCHit.f")
@@ -24,11 +24,26 @@ NAMES["CTH"] = ("CTHHitTree", "CTHHit.f")
 BRANCHES = ['Track.fStartMomentum.fX',
             'Track.fStartMomentum.fY',
             'Track.fStartMomentum.fZ']
+# Turn this on if we want to regenerate the reference sample
+GENERATE_REFERENCE = False
+# Number of branches expected for reference samples
+N_BRANCHES = {}
+N_BRANCHES["CDC"] = 36
+N_BRANCHES["CTH"] = 34
 
 # TODO
 # test import subset of events
+# test signal and background functions on added sample
+# test added sample
 
 # HELPER FUNCTIONS #############################################################
+
+def generate_reference(reference_file, sample, n_branches, desired_branches):
+    # Generate the largest sample of reference data possible
+    if n_branches == desired_branches:
+        np.savez(reference_file, array=sample)
+        raise AssertionError("Generated new reference, test is tautological")
+
 def filter_branches(branches):
     """
     Filter out the branches that are automatically imported
@@ -44,6 +59,58 @@ def filter_branches(branches):
                       'CTHHit.fIsSig']:
         ret_val = [brch for brch in ret_val if filter_br not in brch]
     return ret_val
+
+def check_columns(sample, reference_data):
+    """
+    Helper function to ensure all columns are imported
+    """
+    ref_columns = list(reference_data.dtype.names)
+    ref_columns.sort()
+    new_columns = list(sample.data.dtype.names)
+    new_columns.sort()
+    miss_cols = list(set(new_columns) - set(ref_columns))
+    assert not miss_cols, "Columns in loaded sample are not found in "+\
+        "reference sample \n{}".format("\n".join(miss_cols))
+
+def check_data(sample, reference_data):
+    """
+    Helper function to ensure all columns are imported
+    """
+    for col in sample.data.dtype.names:
+        new_data = sample.data[col]
+        ref_data = reference_data[col]
+        np.testing.assert_allclose(new_data, ref_data, err_msg=col)
+
+def check_filter(filtered_hits, variable, values, greater, less, invert):
+    """
+    Helper function for filter tests
+    """
+    # Ensure there are some events left
+    assert len(filtered_hits) != 0, "Filter has removed all hits!"+\
+            " This has resulted in a trivial check"
+    # Ensure they pass all the filter requirements
+    err = "Sample filtered on variable {} ".format(variable)
+    if values is not None:
+        test = np.all(np.in1d(filtered_hits[variable], values))
+        if invert:
+            test = not test
+        assert test, \
+            err + "did not filter by values {} correctly".format(values)+\
+            " {}".format(filtered_hits[variable])
+    if greater is not None:
+        test = np.all(filtered_hits[variable] > greater)
+        if invert:
+            test = not test
+        assert test, \
+            err + "did not filter by 'greater than' {} correctly".format(greater)+\
+            " {}".format(filtered_hits[variable])
+    if less is not None:
+        test = np.all(filtered_hits[variable] < less)
+        if invert:
+            test = not test
+        assert test, \
+            err + "did not filter by 'greater than' {} correctly".format(less)+\
+            " {}".format(filtered_hits[variable])
 
 # TEST HELPER FUNCTIONS ########################################################
 
@@ -130,6 +197,8 @@ def flat_hits(cstrct_hits_params):
                            tree=tree,
                            prefix=prefix,
                            branches=branches)
+    # Assign every 5th hit as signal
+    sample.data[sample.hit_type_name][::5] = bool(sample.signal_coding)
     return sample, file, geom
 
 @pytest.fixture()
@@ -141,6 +210,13 @@ def flat_hits_and_ref(flat_hits):
     sample, file, geom = flat_hits
     # Check that it is the same as the first time we loaded in this data
     reference_file = file+"_"+geom+".npz"
+    # Generate the referece file if needed
+    if GENERATE_REFERENCE:
+        n_branches = len(sample.data.dtype.names)
+        generate_reference(reference_file,
+                           sample.data,
+                           n_branches,
+                           N_BRANCHES[geom])
     reference_data = np.load(reference_file)["array"]
     # Return the information
     return sample, reference_data
@@ -152,13 +228,7 @@ def test_sample_columns(flat_hits_and_ref):
     # Unpack the information
     sample, reference_data = flat_hits_and_ref
     # Ensure column names are subset of reference names
-    ref_columns = list(reference_data.dtype.names)
-    ref_columns.sort()
-    new_columns = list(sample.data.dtype.names)
-    new_columns.sort()
-    miss_cols = list(set(new_columns) - set(ref_columns))
-    assert not miss_cols, "Columns in loaded sample are not found in "+\
-        "reference sample \n{}".format("\n".join(miss_cols))
+    check_columns(sample, reference_data)
 
 def test_sample_data(flat_hits_and_ref):
     """
@@ -167,10 +237,7 @@ def test_sample_data(flat_hits_and_ref):
     # Unpack the information
     sample, reference_data = flat_hits_and_ref
     # Ensure all the data is the same
-    for col in sample.data.dtype.names:
-        new_data = sample.data[col]
-        ref_data = reference_data[col]
-        np.testing.assert_allclose(new_data, ref_data)
+    check_data(sample, reference_data)
 
 # FLAT HITS SELECTED TESTS #####################################################
 @pytest.fixture(params=[
@@ -283,12 +350,9 @@ def test_flat_hits_empty(flat_hits_empty):
 
 # TEST GET EVENT FUCNTIONS #####################################################
 
-@pytest.fixture(params=[
-    (None, "a"),
-    (2, "b"),
-    (3, "c"),
-    (np.arange(5), "d"),
-    ([1, 3, 7, 10, 11], "e")])
+EVENT_LIST = [None, 2, 3, np.arange(5), [1, 3, 7, 10, 11]]
+
+@pytest.fixture(params=list(enumerate(EVENT_LIST)))
 def event_params(request):
     """
     Parameters for event functions
@@ -302,20 +366,18 @@ def events_and_ref_data(flat_hits, event_params):
     """
     # Get the event data from the file
     sample, file, geom = flat_hits
-    events, file_index = event_params
+    file_index, events = event_params
     # Get the reference file
-    ref_file = file + "_" + geom + "_eventdata.npz"
-    ref_data = np.load(ref_file)[file_index]
+    ref_file = file + "_" + geom + "_eventdata_"+str(file_index)+".npz"
+    # Generate the reference data if needed
+    if GENERATE_REFERENCE:
+        n_branches = len(sample.data.dtype.names)
+        generate_reference(ref_file,
+                           sample.get_events(events),
+                           n_branches,
+                           N_BRANCHES[geom])
+    ref_data = np.load(ref_file)["array"]
     return sample, ref_data, events
-# GENERATE THE REFERENCE
-#    evts = [None, 2,3,list(range(5)),[1, 3, 7, 10, 11]]
-#    if len(list(sample.data.dtype.names)) > 10:
-#        np.savez_compressed(ref_file,
-#                            a=sample.get_events(evts[0]),
-#                            b=sample.get_events(evts[1]),
-#                            c=sample.get_events(evts[2]),
-#                            d=sample.get_events(evts[3]),
-#                            e=sample.get_events(evts[4]))
 
 def test_get_event(events_and_ref_data):
     """
@@ -326,6 +388,28 @@ def test_get_event(events_and_ref_data):
     event_data = sample.get_events(events)
     for branch in event_data.dtype.names:
         np.testing.assert_allclose(ref_data[branch], event_data[branch])
+
+def test_get_signal_hits(events_and_ref_data):
+    """
+    Test if getting specific events works as it is supposed to
+    """
+    # Unpack the data
+    sample, ref_data, events = events_and_ref_data
+    event_data = sample.get_signal_hits(events)
+    test_ref = ref_data[ref_data[sample.hit_type_name] == sample.signal_coding]
+    for branch in event_data.dtype.names:
+        np.testing.assert_allclose(test_ref[branch], event_data[branch])
+
+def test_get_background_hits(events_and_ref_data):
+    """
+    Test if getting specific events works as it is supposed to
+    """
+    # Unpack the data
+    sample, ref_data, events = events_and_ref_data
+    event_data = sample.get_background_hits(events)
+    test_ref = ref_data[ref_data[sample.hit_type_name] != sample.signal_coding]
+    for branch in event_data.dtype.names:
+        np.testing.assert_allclose(test_ref[branch], event_data[branch])
 
 @pytest.mark.parametrize("sort_branch, ascending", [
     (BRANCHES[0], True),
@@ -341,49 +425,18 @@ def test_sort_hits(events_and_ref_data, sort_branch, ascending):
     evt_branch = sample.prefix+"event_index"
     sort_branch = sample.prefix+sort_branch
     # Sort the data
-    ref_data = np.sort(ref_data, order=[evt_branch, sort_branch])
+    test_ref = np.sort(ref_data, order=[evt_branch, sort_branch])
     sample.sort_hits(sort_branch, ascending=ascending)
     event_data = sample.get_events(events)
     # Check that it worked
     for branch in event_data.dtype.names:
-        if "hits_index" not in branch:
+        if ("hits_index" not in branch) and ("IsSig" not in branch):
             error_msg = "Branch {} not sorted".format(branch)
-            np.testing.assert_allclose(ref_data[branch],
+            np.testing.assert_allclose(test_ref[branch],
                                        event_data[branch],
                                        err_msg=error_msg)
 
 # TEST FILTERS  ################################################################
-
-def check_filter(filtered_hits, variable, values, greater, less, invert):
-    """
-    Helper function for filter tests
-    """
-    # Ensure there are some events left
-    assert len(filtered_hits) != 0, "Filter has removed all hits!"+\
-            " This has resulted in a trivial check"
-    # Ensure they pass all the filter requirements
-    err = "Sample filtered on variable {} ".format(variable)
-    if values is not None:
-        test = np.all(np.in1d(filtered_hits[variable], values))
-        if invert:
-            test = not test
-        assert test, \
-            err + "did not filter by values {} correctly".format(values)+\
-            " {}".format(filtered_hits[variable])
-    if greater is not None:
-        test = np.all(filtered_hits[variable] > greater)
-        if invert:
-            test = not test
-        assert test, \
-            err + "did not filter by 'greater than' {} correctly".format(greater)+\
-            " {}".format(filtered_hits[variable])
-    if less is not None:
-        test = np.all(filtered_hits[variable] < less)
-        if invert:
-            test = not test
-        assert test, \
-            err + "did not filter by 'greater than' {} correctly".format(less)+\
-            " {}".format(filtered_hits[variable])
 
 @pytest.fixture(params=[
     #variable,      values,       greater, less, invert

@@ -9,6 +9,15 @@ import numpy as np
 from root_numpy import root2array, list_branches
 from cylinder import CDC, CTH
 
+# TODO clean up data importing to only call data import ONCE
+# TODO swith to pandas
+# TODO deal with empty CTH events or empty CDC events
+# TODO don't cache row and index data, just cache the mapping and evaluate it 
+#      when needed
+# TODO improve CTH tigger logic to have time window
+# TODO improve CTH hits to sum over 10ns bins
+# TODO improve dealing with coincidence for CDC hits
+
 def _is_sequence(arg):
     """
     Check if the argument is iterable
@@ -33,7 +42,7 @@ def _return_branches_as_list(branches):
         branches = [branches]
     return branches
 
-def check_for_branches(path, tree, branches, soft_check=False):
+def check_for_branches(path, tree, branches, soft_check=False, verbose=False):
     """
     This checks for the needed branches before they are imported to avoid
     the program to hang without any error messages
@@ -52,7 +61,8 @@ def check_for_branches(path, tree, branches, soft_check=False):
                   "\n".join(bad_branches) + "\n are not availible\n"+\
                   "The branches availible are:\n"+"\n".join(availible_branches)
         if soft_check:
-            print(err_msg)
+            if verbose:
+                print(err_msg)
             return False
         # Check that this is zero in length
         assert not bad_branches, err_msg
@@ -182,10 +192,7 @@ class FlatHits(object):
         # TODO fix hack
         empty_branches = np.unique(empty_branches)
         for branch in empty_branches:
-            if branch == self.hit_type_name:
-                self.data += [np.zeros(self.n_hits, dtype=bool)]
-            else:
-                self.data += [np.zeros(self.n_hits)]
+            self.data += [np.zeros(self.n_hits)]
             self.all_branches += [branch]
 
         # Finialize the data if this is the final form
