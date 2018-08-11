@@ -8,6 +8,7 @@ import numpy as np
 sys.path.insert(0, "../modules")
 from root_numpy import list_branches
 import hits
+from hits import check_for_branches
 
 # Pylint settings
 # pylint: disable=redefined-outer-name
@@ -25,9 +26,8 @@ BRANCHES = ['Track.fStartMomentum.fX',
             'Track.fStartMomentum.fZ']
 
 # TODO
-# test get measurement
-# test sort hits
 # test import subset of events
+# test check branch
 
 # HELPER FUNCTIONS #############################################################
 def filter_branches(branches):
@@ -67,17 +67,17 @@ def flat_hits(cstrct_hits_params):
     Construct the base flat hits object
     """
     # Unpack the parameters
-    file, geom, branch = cstrct_hits_params
+    file, geom, branches = cstrct_hits_params
     tree, prefix = NAMES[geom]
     root_file = file + ".root"
     # Load all the branches
-    if branch == "all":
-        branch = filter_branches(list_branches(root_file, treename=tree))
+    if branches == "all":
+        branches = filter_branches(list_branches(root_file, treename=tree))
     # Load the file
     sample = hits.FlatHits(root_file,
                            tree=tree,
                            prefix=prefix,
-                           branches=branch)
+                           branches=branches)
     return sample, file, geom
 
 @pytest.fixture()
@@ -92,6 +92,27 @@ def flat_hits_and_ref(flat_hits):
     reference_data = np.load(reference_file)["array"]
     # Return the information
     return sample, reference_data
+
+def test_check_branch(cstrct_hits_params):
+    """
+    Check if testing for the branch in the data works
+    """
+    # Unpack the parameters
+    file, geom, branches = cstrct_hits_params
+    tree, _ = NAMES[geom]
+    a_file = file + ".root"
+    # Load all the branches
+    if branches == "all":
+        branches = list_branches(a_file, treename=tree)
+    # Check if we can find the branch(es) we expect
+    err_msg = "Did not find expected branches:\n{}".format("\n".join(branches))
+    found_good = check_for_branches(a_file, tree, branches, soft_check=True)
+    assert found_good, err_msg
+    # Check that bad equests are rejected
+    bad_branches = ["garbage" + brch for brch in branches]
+    err_msg = "Found non-existant branches:\n{}".format("\n".join(bad_branches))
+    found_bad = check_for_branches(a_file, tree, bad_branches, soft_check=True)
+    assert not found_bad, err_msg
 
 def test_sample_columns(flat_hits_and_ref):
     """
@@ -134,10 +155,10 @@ def cstrct_hits_params_sel(request, cstrct_hits_params):
     """
     Parameterize the flat hit parameters with selections
     """
-    file, geom, branch = cstrct_hits_params
+    file, geom, branches = cstrct_hits_params
     selection = request.param
     selection = " && ".join(NAMES[geom][1]+sel for sel in selection)
-    return file, geom, branch, selection
+    return file, geom, branches, selection
 
 @pytest.fixture()
 def flat_hits_sel(cstrct_hits_params_sel):
@@ -145,18 +166,18 @@ def flat_hits_sel(cstrct_hits_params_sel):
     Construct the base flat hits object with some selections
     """
     # Unpack the parameters
-    file, geom, branch, selection = cstrct_hits_params_sel
+    file, geom, branches, selection = cstrct_hits_params_sel
     tree, prefix = NAMES[geom]
     root_file = file + ".root"
     # Load all the branches
-    if branch == "all":
-        branch = filter_branches(list_branches(root_file, treename=tree))
+    if branches == "all":
+        branches = filter_branches(list_branches(root_file, treename=tree))
     # Load the file
     sample = hits.FlatHits(root_file,
                            tree=tree,
                            prefix=prefix,
                            selection=selection,
-                           branches=branch)
+                           branches=branches)
     return sample, selection
 
 def test_flat_hits_sel(flat_hits_sel):
@@ -229,26 +250,32 @@ def test_flat_hits_empty(flat_hits_empty):
         np.testing.assert_allclose(sample.data[empty_branch],
                                    np.zeros_like(sample.data[empty_branch]))
 
-# TEST GETTERS #################################################################
+# TEST GET EVENT FUCNTIONS #####################################################
 
-@pytest.mark.parametrize("events, file_index", [
+@pytest.fixture(params=[
     (None, "a"),
     (2, "b"),
     (3, "c"),
     (np.arange(5), "d"),
     ([1, 3, 7, 10, 11], "e")])
-def test_get_event(flat_hits, events, file_index):
+def event_params(request):
     """
-    Test if getting specific events works as it is supposed to
+    Parameters for event functions
+    """
+    return request.param
+
+@pytest.fixture()
+def events_and_ref_data(flat_hits, event_params):
+    """
+    Return a subsample of events and their reference data
     """
     # Get the event data from the file
     sample, file, geom = flat_hits
-    event_data = sample.get_events(events)
+    events, file_index = event_params
     # Get the reference file
     ref_file = file + "_" + geom + "_eventdata.npz"
     ref_data = np.load(ref_file)[file_index]
-    for branch in event_data.dtype.names:
-        np.testing.assert_allclose(ref_data[branch], event_data[branch])
+    return sample, ref_data, events
 # GENERATE THE REFERENCE
 #    evts = [None, 2,3,list(range(5)),[1, 3, 7, 10, 11]]
 #    if len(list(sample.data.dtype.names)) > 10:
@@ -258,6 +285,41 @@ def test_get_event(flat_hits, events, file_index):
 #                            c=sample.get_events(evts[2]),
 #                            d=sample.get_events(evts[3]),
 #                            e=sample.get_events(evts[4]))
+
+def test_get_event(events_and_ref_data):
+    """
+    Test if getting specific events works as it is supposed to
+    """
+    # Unpack the data
+    sample, ref_data, events = events_and_ref_data
+    event_data = sample.get_events(events)
+    for branch in event_data.dtype.names:
+        np.testing.assert_allclose(ref_data[branch], event_data[branch])
+
+@pytest.mark.parametrize("sort_branch, ascending", [
+    (BRANCHES[0], True),
+    (BRANCHES[2], True)
+    ])
+def test_sort_hits(events_and_ref_data, sort_branch, ascending):
+    """
+    Test if getting specific events works as it is supposed to
+    """
+    # Unpack the data
+    sample, ref_data, events = events_and_ref_data
+    # Get the branch names
+    evt_branch = sample.prefix+"event_index"
+    sort_branch = sample.prefix+sort_branch
+    # Sort the data
+    ref_data = np.sort(ref_data, order=[evt_branch, sort_branch])
+    sample.sort_hits(sort_branch, ascending=ascending)
+    event_data = sample.get_events(events)
+    # Check that it worked
+    for branch in event_data.dtype.names:
+        if "hits_index" not in branch:
+            error_msg = "Branch {} not sorted".format(branch)
+            np.testing.assert_allclose(ref_data[branch],
+                                       event_data[branch],
+                                       err_msg=error_msg)
 
 # TEST FILTERS  ################################################################
 
@@ -277,7 +339,6 @@ def check_filter(filtered_hits, variable, values, greater, less, invert):
         assert test, \
             err + "did not filter by values {} correctly".format(values)+\
             " {}".format(filtered_hits[variable])
-
     if greater is not None:
         test = np.all(filtered_hits[variable] > greater)
         if invert:
@@ -285,7 +346,6 @@ def check_filter(filtered_hits, variable, values, greater, less, invert):
         assert test, \
             err + "did not filter by 'greater than' {} correctly".format(greater)+\
             " {}".format(filtered_hits[variable])
-
     if less is not None:
         test = np.all(filtered_hits[variable] < less)
         if invert:

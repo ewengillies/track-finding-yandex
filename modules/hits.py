@@ -32,6 +32,37 @@ def _return_branches_as_list(branches):
         branches = [branches]
     return branches
 
+def check_for_branches(path, tree, branches, soft_check=False):
+    """
+    This checks for the needed branches before they are imported to avoid
+    the program to hang without any error messages
+
+    :param path: path to root file
+    :param tree: name of tree in root file
+    :param branches: required branches
+    """
+    # Import one event with all the branches to get the names of the
+    # branches
+    # TODO use list_branches in root2array here
+    dummy_root = root2array(path, treename=tree, start=0, stop=1)
+    # Get the names of the imported branches
+    availible_branches = dummy_root.dtype.names
+    # Get the requested branches that are not availible
+    bad_branches = list(set(branches) - set(availible_branches))
+    bad_request = len(bad_branches) != 0
+    # Otherwise, shut it down if its the wrong length
+    if bad_request:
+        err_msg = "ERROR: The requested branches:\n"+\
+                  "\n".join(bad_branches) + "\n are not availible\n"+\
+                  "The branches availible are:\n"+"\n".join(availible_branches)
+        if soft_check:
+            print(err_msg)
+            return False
+        # Check that this is zero in length
+        assert not bad_branches, err_msg
+        # Otherwise return true
+    return True
+
 class FlatHits(object):
     # pylint: disable=too-many-instance-attributes
     # pylint: disable=bad-continuation
@@ -149,44 +180,14 @@ class FlatHits(object):
         if finalize_data:
             self._finalize_data()
 
-    def _check_for_branches(self, path, tree, branches, soft_check=False):
-        """
-        This checks for the needed branches before they are imported to avoid
-        the program to hang without any error messages
-
-        :param path: path to root file
-        :param tree: name of tree in root file
-        :param branches: required branches
-        """
-        # Import one event with all the branches to get the names of the
-        # branches
-        # TODO use list_branches in root2array here
-        dummy_root = root2array(path, treename=tree, start=0, stop=1)
-        # Get the names of the imported branches
-        availible_branches = dummy_root.dtype.names
-        # Get the requested branches that are not availible
-        bad_branches = list(set(branches) - set(availible_branches))
-        bad_request = len(bad_branches) != 0
-        # Return false if this is a soft check and these branches are not found
-        if soft_check and bad_request:
-            return False
-        # Otherwise, shut it down if its the wrong length
-        elif bad_request:
-            # Check that this is zero in length
-            assert len(bad_branches) == 0, "ERROR: The requested branches:\n"+\
-                    "\n".join(bad_branches) + "\n are not availible\n"+\
-                    "The branches availible are:\n"+"\n".join(availible_branches)
-        else:
-            return True
-
     def _add_name_to_branches(self, path, tree, name, branches, empty_branches):
         """
         Determine which list of branches to put this variable
         """
         # Check if this file already has one
-        has_name = self._check_for_branches(path, tree,
-                                               branches=[name],
-                                               soft_check=True)
+        has_name = check_for_branches(path, tree,
+                                      branches=[name],
+                                      soft_check=True)
         if has_name:
             branches = _return_branches_as_list(branches)
             branches += [name]
@@ -208,7 +209,7 @@ class FlatHits(object):
         if not _is_sequence(branches):
             branches = [branches]
         # Check the branches we want are there
-        _ = self._check_for_branches(path, tree, branches)
+        check_for_branches(path, tree, branches)
         # Grab the branches one by one to save on memory
         data_columns = []
         # TODO absorb event loading limit into selection
@@ -229,7 +230,7 @@ class FlatHits(object):
         the root files
         """
         # Check the branch we need to define the number of hits is there
-        _ = self._check_for_branches(path, tree, branches=[self.key_name])
+        check_for_branches(path, tree, branches=[self.key_name])
         # Import the data
         event_data = root2array(path, treename=tree,
                                 branches=[self.key_name],
@@ -314,7 +315,6 @@ class FlatHits(object):
         empty_events = np.where(self.event_to_n_hits > 0)[0]
         self._trim_lookup_tables(empty_events)
 
-    # TODO depreciate
     def _trim_lookup_tables(self, events):
         """
         Trim the lookup tables to the given event indexes
@@ -387,7 +387,6 @@ class FlatHits(object):
         """
         self.trim_hits(self.key_name, values=events)
 
-    # TODO test
     def sort_hits(self, variable, ascending=True, reset_index=True):
         """
         Sorts the hits by the given variable inside each event.  By default,
@@ -812,14 +811,13 @@ class CDCHits(GeomHits):
         row and volume index
         """
         # Check if chan_name is present is the root file
-        has_chan = self._check_for_branches(path, tree,
-                                            branches=[self.chan_name],
-                                            soft_check=True)
+        has_chan = check_for_branches(path, tree,
+                                      branches=[self.chan_name],
+                                      soft_check=True)
         if has_chan:
             return self._import_root_file(path, tree,
                                           branches=[self.chan_name])[0]
-        else:
-            return super(CDCHits, self)._get_geom_flat_ids(path, tree)
+        return super(CDCHits, self)._get_geom_flat_ids(path, tree)
 
 
     def get_measurement(self, name, events=None, shift=None, default=0,
