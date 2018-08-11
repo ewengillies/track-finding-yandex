@@ -11,7 +11,6 @@ import scipy
 from root_numpy import root2array, list_branches
 from cylinder import CDC, CTH
 
-# TODO create event selection via hit selection on input
 # TODO swith to pandas
 # TODO improve adding two samples together
 # TODO deal with empty CTH events or empty CDC events
@@ -156,10 +155,6 @@ class FlatHits(object):
         self._generate_lookup_tables()
         # Fill the counters
         self._generate_counters()
-        print(sum(self.event_to_n_hits))
-        print(len(self.hits_to_events))
-        print(self._first_hit)
-
         # Finialize the data into the data structures
         self._finalize_data(path, tree)
 
@@ -232,10 +227,7 @@ class FlatHits(object):
         """
         # Build the look up tables
         first_hit = 0
-        try:
-            hits_to_events = np.zeros(sum(self.event_to_n_hits))
-        except ValueError:
-            print(type(self.event_to_n_hits))
+        hits_to_events = np.zeros(sum(self.event_to_n_hits))
         event_to_hits = []
         for event, n_hits in enumerate(self.event_to_n_hits):
             # Record the last hit in the event
@@ -319,15 +311,13 @@ class FlatHits(object):
         # Remember the order of these branches
         self.all_branches = self._branches
         # Add the empty data that will be filled
-        print(self.n_hits)
         self.data += [np.zeros(self.n_hits).astype(typ)
                       for typ in self._e_branch_dict.values()]
         # Set the names of all branches
         self.all_branches = self._branches + list(self._e_branch_dict.keys())
-        # Reset the data as a recarray
-        for _data, _branch in zip(self.data, self.all_branches):
-            print(_data.shape, _branch)
+        # Set the data for all the branches
         self.data = np.rec.fromarrays(self.data, names=(self.all_branches))
+        # Generate the indexes
         self._generate_indexes()
 
     def _get_mask(self, these_hits, variable, values=None, greater_than=None,
