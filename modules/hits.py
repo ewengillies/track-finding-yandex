@@ -73,13 +73,10 @@ def check_for_branches(path, tree, branches, soft_check=False, verbose=False):
         # Otherwise return true
     return True
 
-def _add_name_to_branches(path, tree, name, prefix, branches, empty_branches):
+def _add_name_to_branches(path, tree, name, branches, empty_branches):
     """
     Determine which list of branches to put this variable
     """
-    # Add the prefix
-    if not name.startswith(prefix):
-        name = prefix + branch
     # Check if this file already has one
     has_name = check_for_branches(path, tree,
                                   branches=[name],
@@ -179,19 +176,13 @@ class FlatHits(object):
             branches = [branches]
         # Check the branches we want are there
         check_for_branches(path, tree, branches)
-        # Grab the branches one by one to save on memory
-        data_columns = []
         # TODO absorb event loading limit into selection
-        # TODO get rid of this loop
-        for branch in branches:
-            # Grab the branch
-            event_data = root2array(path, treename=tree,
-                                    branches=[branch],
-                                    selection=self.selection)
-            # Append the data
-            data_columns.append(event_data[branch])
-        # Return the columns
-        return data_columns
+        # Grab the branch
+        event_data = root2array(path, treename=tree,
+                                branches=branches,
+                                selection=self.selection)
+        # Append the data
+        return [event_data[branch] for branch in branches]
 
     # TODO depreciate
     def _generate_event_to_n_hits_table(self, path, tree):
@@ -526,7 +517,6 @@ class GeomHits(FlatHits, ABC):
         branches, empty_branches = _add_name_to_branches(path,
                                                          tree,
                                                          self.trig_name,
-                                                         prefix,
                                                          branches,
                                                          empty_branches)
         # Define the names of the time and energy depostition columns
@@ -738,7 +728,6 @@ class CDCHits(GeomHits):
                               signal hit
         """
         # Set the channel name for the flat_ids
-        # TODO this is ugly, please clear out the look up table business
         self.chan_name = prefix + chan_name
         # Build the geom hits object
         GeomHits.__init__(self,
@@ -1010,7 +999,6 @@ class CTHHits(GeomHits):
                           **kwargs)
         self.row_name = self.prefix + row_name
         self.idx_name = self.prefix + idx_name
-
         if finalize_data:
             self._finalize_data()
 
@@ -1053,7 +1041,7 @@ class CTHHits(GeomHits):
                hodoscope.startswith("down"),\
                "Hodoscope "+ hodoscope +" selected.  This must be both, "+\
                " upstream, or downstream"
-        events = super(self.__class__, self).get_events(events)
+        events = super(CTHHits, self).get_events(events)
         if hodoscope.startswith("up"):
             events = self.filter_hits(self.flat_name,
                                       these_hits=events,

@@ -171,7 +171,6 @@ def test_add_branch(good_bad_branches):
         full_branches, empty_branches = _add_name_to_branches(a_file,
                                                               tree,
                                                               branch,
-                                                              "",
                                                               full_branches,
                                                               empty_branches)
     assert full_branches == branches,\
