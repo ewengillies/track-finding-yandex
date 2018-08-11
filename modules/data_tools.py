@@ -207,51 +207,6 @@ def data_import_sample(this_signal, this_background,
     sig_hits.n_events = sig_hits.cdc.n_events
     return sig_hits
 
-def data_remove_coincidence(sample, sort_hits=True):
-    # Get the energy deposition summed
-    all_events = np.arange(sample.cdc.n_events)
-    edep_sparse = scipy.sparse.lil_matrix((sample.cdc.n_events,
-                                           sample.cdc.geom.n_points))
-    sig_hit_sparse = scipy.sparse.lil_matrix((sample.cdc.n_events,
-                                              sample.cdc.geom.n_points))
-    for evt in all_events:
-        # Get the wire_ids of the hit data
-        wire_ids = sample.cdc.get_hit_vols(evt, unique=False)
-        # Get the summed energy deposition
-        edep = np.zeros((sample.cdc.geom.n_points))
-        edep_meas = sample.cdc.get_events(evt)[sample.cdc.edep_name]
-        np.add.at(edep, wire_ids, edep_meas)
-        # Assign this to the sparse array
-        edep_sparse[evt, :] = edep
-        # Check if there is a signal on this hit
-        sig_hit = np.zeros((sample.cdc.geom.n_points))
-        sig_hit_meas = sample.cdc.get_events(evt)[sample.cdc.hit_type_name] == \
-                      sample.cdc.signal_coding
-        np.logical_or.at(sig_hit, wire_ids, sig_hit_meas)
-        # Assign this to the sparse array
-        sig_hit_sparse[evt, :] = sig_hit
-    # Sort by hit type name to keep signal hits preferentialy
-    if sort_hits:
-        sample.cdc.sort_hits(sample.cdc.time_name, reset_index=True)
-    hit_indexes = sample.cdc.get_measurement(sample.cdc.hits_index_name,
-                                             all_events)
-    # Remove the hits that are not needed
-    sample.cdc.trim_hits(sample.cdc.hits_index_name, values=hit_indexes)
-    all_events = np.arange(sample.cdc.n_events)
-    # Get the wire_ids and event_ids of the hit data
-    wire_ids = sample.cdc.get_hit_vols(all_events, unique=False)
-    # Map the evnt_ids to the minimal continous set
-    evnt_ids = np.repeat(np.arange(all_events.size),
-                         sample.cdc.event_to_n_hits[all_events])
-    # Force the new edep and is_sig values onto the sample
-    hit_indexes = \
-        sample.cdc.get_measurement(sample.cdc.hits_index_name,
-                                   all_events).astype(int)
-    sample.cdc.data[sample.cdc.edep_name][hit_indexes] = \
-            edep_sparse[evnt_ids, wire_ids].toarray()
-    sample.cdc.data[sample.cdc.hit_type_name][hit_indexes] = \
-            sig_hit_sparse[evnt_ids, wire_ids].toarray()
-
 def data_get_measurment_and_neighbours(hit_sample, measurement, events=None, digitize=False, bins=None,
                                        **kwargs):
     """
@@ -274,26 +229,6 @@ def data_get_measurment_and_neighbours(hit_sample, measurement, events=None, dig
                                            flatten=True, **kwargs)
                     for i in [0,-1,1]]
 
-def data_get_occupancy(cdc_sample):
-    """
-    Returns sig_occ, back_occ, total_occ
-    """
-    sig_occ, back_occ, occ = list(), list(), list()
-    for event in range(cdc_sample.n_events):
-        sig_occ += [len(np.unique(cdc_sample.get_signal_hits(event)[cdc_sample.flat_name]))]
-        back_occ += [len(np.unique(cdc_sample.get_background_hits(event)[cdc_sample.flat_name]))]
-        occ += [len(np.unique(cdc_sample.get_events(event)[cdc_sample.flat_name]))]
-
-    # print some infor
-    avg_n_hits = np.average(cdc_sample.event_to_n_hits)
-    avg_occ = np.average(occ)
-    print(("Sig Occ: {} , Back Occ : {}".format(np.average(sig_occ), np.average(back_occ))))
-    print(("All Occ: {}, {}".format(avg_occ, avg_occ/4482.)))
-    print(("NumHits: {}".format(avg_n_hits)))
-    print(("MinChansMultiHit: {}".format((avg_n_hits - avg_occ)/float(avg_occ))))
-
-    return sig_occ, back_occ, occ
-
 def data_convert_to_local_cdc(sample):
     # Store the expected names of the positions
     pos = dict()
@@ -306,4 +241,3 @@ def data_convert_to_local_cdc(sample):
         samp.data[pos[name]["Y"]] = samp.data[pos[name]["Y"]]/10.
         samp.data[pos[name]["X"]] = samp.data[pos[name]["X"]]/10. - 641
     return pos
-

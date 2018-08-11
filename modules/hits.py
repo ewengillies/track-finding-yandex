@@ -8,6 +8,7 @@ from __future__ import print_function
 import numpy as np
 from root_numpy import root2array, list_branches
 from cylinder import CDC, CTH
+import scipy
 
 # TODO clean up data importing to only call data import ONCE
 # TODO swith to pandas
@@ -822,6 +823,55 @@ class CDCHits(GeomHits):
                                           branches=[self.chan_name])[0]
         return super(CDCHits, self)._get_geom_flat_ids(path, tree)
 
+    def remove_coincidence(self, sort_hits=True):
+        """
+        Removes the coincidence by:
+            * Summing the energy deposition
+            * Taking a signal hit label if it exists on the channel
+            * Taking the rest of the values from the earliest hit on the channel
+        """
+        # Get the energy deposition summed
+        all_events = np.arange(self.n_events)
+        edep_sparse = scipy.sparse.lil_matrix((self.n_events,
+                                               self.geom.n_points))
+        sig_hit_sparse = scipy.sparse.lil_matrix((self.n_events,
+                                                  self.geom.n_points))
+        for evt in all_events:
+            # Get the wire_ids of the hit data
+            wire_ids = self.get_hit_vols(evt, unique=False)
+            # Get the summed energy deposition
+            edep = np.zeros((self.geom.n_points))
+            edep_meas = self.get_events(evt)[self.edep_name]
+            np.add.at(edep, wire_ids, edep_meas)
+            # Assign this to the sparse array
+            edep_sparse[evt, :] = edep
+            # Check if there is a signal on this hit
+            sig_hit = np.zeros((self.geom.n_points))
+            sig_hit_meas = self.get_events(evt)[self.hit_type_name] == \
+                          self.signal_coding
+            np.logical_or.at(sig_hit, wire_ids, sig_hit_meas)
+            # Assign this to the sparse array
+            sig_hit_sparse[evt, :] = sig_hit
+        # Sort by hit type name to keep the earliest hits
+        if sort_hits:
+            self.sort_hits(self.time_name, reset_index=True)
+        hit_indexes = self.get_measurement(self.hits_index_name, all_events)
+        # Remove the hits that are not needed
+        self.trim_hits(self.hits_index_name, values=hit_indexes)
+        all_events = np.arange(self.n_events)
+        # Get the wire_ids and event_ids of the hit data
+        wire_ids = self.get_hit_vols(all_events, unique=False)
+        # Map the evnt_ids to the minimal continous set
+        evnt_ids = np.repeat(np.arange(all_events.size),
+                             self.event_to_n_hits[all_events])
+        # Force the new edep and is_sig values onto the sample
+        hit_indexes = \
+            self.get_measurement(self.hits_index_name,
+                                       all_events).astype(int)
+        self.data[self.edep_name][hit_indexes] = \
+                edep_sparse[evnt_ids, wire_ids].toarray()
+        self.data[self.hit_type_name][hit_indexes] = \
+                sig_hit_sparse[evnt_ids, wire_ids].toarray()
 
     def get_measurement(self, name, events=None, shift=None, default=0,
                         only_hits=True, flatten=False, use_sparse=False):
