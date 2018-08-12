@@ -2,7 +2,7 @@
 Tests for importing data from root file
 """
 from __future__ import print_function
-import sys
+#import sys
 from root_numpy import list_branches
 import pytest
 import numpy as np
@@ -10,7 +10,6 @@ from numpy.testing import assert_allclose
 from test_flat_hits import check_columns, check_data,\
                            filter_branches, generate_reference
 from test_flat_hits import FILES, NAMES, BRANCHES, GENERATE_REFERENCE
-sys.path.insert(0, "../modules") # TODO remove this when installed software
 import hits
 
 # Pylint settings
@@ -112,7 +111,6 @@ def test_all_cdc_branches_present(cdc_hits_and_ref):
         ref_branches = reference_data.dtype.names
         smp_branches = sample.data.columns.values
         miss = [b for b in ref_branches if b not in smp_branches]
-        miss = [b for b in miss if "_index" not in b]
         assert not miss,\
             "Requested all branches, but did not find {}".format("\n".join(miss))
 

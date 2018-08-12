@@ -2,11 +2,10 @@
 Tests for importing data from root file
 """
 from __future__ import print_function
-import sys
+#import sys
 import pytest
 import numpy as np
 from numpy.testing import assert_allclose
-sys.path.insert(0, "../modules")
 from root_numpy import list_branches
 import hits
 from hits import check_for_branches, _add_name_to_branches, _is_sequence
@@ -39,6 +38,9 @@ N_BRANCHES["CTH"] = 32
 # HELPER FUNCTIONS #############################################################
 
 def generate_reference(reference_file, sample, n_branches, desired_branches):
+    """
+    Generate the reference file from a given sample file
+    """
     # Generate the largest sample of reference data possible
     if n_branches == desired_branches:
         # Try to convert it to records if its a pandas DF
@@ -72,7 +74,6 @@ def check_columns(sample, reference_data):
     ref_columns = sorted(list(reference_data.dtype.names))
     new_columns = sorted(list(sample.data.columns.values))
     miss_cols = list(set(new_columns) - set(ref_columns))
-    # TODO remove this index checker
     assert not miss_cols, "Columns in loaded sample are not found in "+\
         "reference sample \n{}".format("\n".join(miss_cols))
 
@@ -122,6 +123,8 @@ def check_filter(filtered_hits, variable, values, greater, less, invert):
 @pytest.fixture(params=[
     # Parameterize the array construction
     # path, geom, branches,
+    (FILES[0], "CDC", None),
+    (FILES[0], "CTH", None),
     (FILES[0], "CDC", 'all'),
     (FILES[0], "CTH", 'all'),
     (FILES[0], "CDC", [NAMES["CDC"][1]+branch for branch in BRANCHES]),
@@ -145,6 +148,8 @@ def good_bad_branches(cstrct_hits_params):
     if branches == "all":
         branches = list_branches(a_file, treename=tree)
     # Return the list of good and bad branches
+    elif branches is None:
+        branches = []
     bad_branches = ["garbage" + brch for brch in branches]
     return branches, bad_branches, a_file, tree
 
@@ -154,6 +159,9 @@ def test_check_branch(good_bad_branches):
     """
     # Unpack the arguments
     branches, bad_branches, a_file, tree = good_bad_branches
+    # Skip the empty branch case for this test
+    if not branches:
+        return
     # Check if we can find the branch(es) we expect
     err_msg = "Did not find expected branches:\n{}".format("\n".join(branches))
     found_good = check_for_branches(a_file, tree, branches, soft_check=True)
@@ -169,6 +177,9 @@ def test_add_branch(good_bad_branches):
     """
     # Unpack the arguments
     branches, bad_branches, a_file, tree = good_bad_branches
+    # Skip the empty branch case for this test
+    if not branches:
+        return
     # Check if we can find the branch(es) we expect
     full_branches = None
     empty_branches = None
@@ -238,8 +249,6 @@ def test_all_branches_present(flat_hits_and_ref):
         ref_branches = reference_data.dtype.names
         smp_branches = sample.data.columns.values
         miss = [b for b in ref_branches if b not in smp_branches]
-        # TODO remove this index checker
-        miss = [b for b in miss if "_index" not in b]
         assert not miss,\
             "Requested all branches, but did not find {}".format("\n".join(miss))
 
@@ -298,13 +307,16 @@ def flat_hits_sel(cstrct_hits_params_sel):
                            prefix=prefix,
                            selection=selection,
                            branches=branches)
-    return sample, selection
+    return sample, selection, branches
 
 def test_flat_hits_sel(flat_hits_sel):
     """
     Test that the selections worked
     """
-    sample, selection = flat_hits_sel
+    sample, selection, branches = flat_hits_sel
+    # Skip the empty branch case for this test
+    if not branches:
+        return
     # Deconstruct the selections
     sel_list = selection.split(" && ")
     sel_list = [sel.split(" ") for sel in sel_list]
@@ -401,8 +413,7 @@ def test_flat_hits_subset(flat_hits_subset):
     data_all = sample_all.get_events(events=np.arange(f_event, l_event))
     data_sub = sample_sub.get_events()
     for col in data_sub.columns.values:
-        if ("event_index" not in col) and ("hits_index" not in col):
-            assert_allclose(data_all[col], data_sub[col], err_msg=col)
+        assert_allclose(data_all[col], data_sub[col], err_msg=col)
 
 # EMPTY BRANCH IMPORT ##########################################################
 
@@ -469,7 +480,7 @@ def events_and_ref_data(flat_hits, event_params):
     Return a subsample of events and their reference data
     """
     # Get the event data from the file
-    sample, file, geom, _ = flat_hits
+    sample, file, geom, branches = flat_hits
     file_index, events = event_params
     # Get the reference file
     ref_file = file + "_" + geom + "_eventdata_"+str(file_index)+".npz"
@@ -481,14 +492,14 @@ def events_and_ref_data(flat_hits, event_params):
                            n_branches,
                            N_BRANCHES[geom])
     ref_data = np.load(ref_file)["array"]
-    return sample, ref_data, events
+    return sample, ref_data, events, branches
 
 def test_get_event(events_and_ref_data):
     """
     Test if getting specific events works as it is supposed to
     """
     # Unpack the data
-    sample, ref_data, events = events_and_ref_data
+    sample, ref_data, events, _ = events_and_ref_data
     event_data = sample.get_events(events)
     for branch in sample.data.columns.values:
         assert_allclose(ref_data[branch], event_data[branch])
@@ -500,7 +511,7 @@ def test_reindex_event(events_and_ref_data, remove_event):
     affect what data is stored
     """
     # Unpack the data
-    sample, _, events = events_and_ref_data
+    sample, _, events, _ = events_and_ref_data
     # Record the shape of the event before
     shape_before = sample.data.shape
     # If the reqested events are None, return them as a range of (all)
@@ -535,9 +546,9 @@ def test_get_signal_hits(events_and_ref_data):
     Test if getting specific events works as it is supposed to
     """
     # Unpack the data
-    sample, ref_data, events = events_and_ref_data
+    sample, ref_data, events, _ = events_and_ref_data
     event_data = sample.get_signal_hits(events)
-    test_ref = ref_data[ref_data[sample.hit_type_name] == True]
+    test_ref = ref_data[ref_data[sample.hit_type_name]]
     for branch in sample.data.columns.values:
         assert_allclose(test_ref[branch], event_data[branch])
 
@@ -546,9 +557,9 @@ def test_get_background_hits(events_and_ref_data):
     Test if getting specific events works as it is supposed to
     """
     # Unpack the data
-    sample, ref_data, events = events_and_ref_data
+    sample, ref_data, events, _ = events_and_ref_data
     event_data = sample.get_background_hits(events)
-    test_ref = ref_data[ref_data[sample.hit_type_name] != True]
+    test_ref = ref_data[~ref_data[sample.hit_type_name]]
     for branch in sample.data.columns.values:
         assert_allclose(test_ref[branch], event_data[branch])
 
@@ -561,7 +572,10 @@ def test_sort_hits(events_and_ref_data, sort_branch, ascending):
     Test if getting specific events works as it is supposed to
     """
     # Unpack the data
-    sample, ref_data, events = events_and_ref_data
+    sample, ref_data, events, branches = events_and_ref_data
+    # Skip the empty branch case for this test
+    if not branches:
+        return
     # Get the branch names
     evt_branch = sample.prefix+"EventNumber"
     sort_branch = [sample.prefix+srt for srt in sort_branch]
@@ -570,14 +584,11 @@ def test_sort_hits(events_and_ref_data, sort_branch, ascending):
     sample.sort_hits(sort_branch, ascending=ascending)
     event_data = sample.get_events(events)
     # Check that it worked
-    passing = True
     for branch in sample.data.columns.values:
-        # TODO remove this
-        if ("hits_index" not in branch):
-            error_msg = "Branch {} not sorted".format(branch)
-            assert_allclose(test_ref[branch],
-                            event_data[branch],
-                            err_msg=error_msg)
+        error_msg = "Branch {} not sorted".format(branch)
+        assert_allclose(test_ref[branch],
+                        event_data[branch],
+                        err_msg=error_msg)
 
 # TEST FILTERS  ################################################################
 
@@ -596,7 +607,10 @@ def test_filtered_hits(flat_hits, filter_params):
     Keep the hits satisfying this criteria
     """
     # Unpack the arguments
-    sample, _, geom, _ = flat_hits
+    sample, _, geom, branches = flat_hits
+    # Skip the empty branch case for this test
+    if not branches:
+        return
     variable, values, greater, less, invert = filter_params
     variable = NAMES[geom][1] + variable
     # Get the relevant hits to keep
@@ -612,7 +626,10 @@ def test_trim_hits(flat_hits, filter_params):
     Keep the hits satisfying this criteria
     """
     # Unpack the arguments
-    sample, _, geom, _ = flat_hits
+    sample, _, geom, branches = flat_hits
+    # Skip the empty branch case for this test
+    if not branches:
+        return
     variable, values, greater, less, invert = filter_params
     variable = NAMES[geom][1] + variable
     # Get the relevant hits to keep
