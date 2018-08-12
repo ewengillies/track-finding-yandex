@@ -10,13 +10,16 @@ import numpy as np
 import scipy
 from root_numpy import root2array, list_branches
 from cylinder import CDC, CTH
+import pandas as pd
 
 # TODO swith to pandas
-# TODO improve adding two samples together
-# TODO deal with empty CTH events or empty CDC events
+# TODO deal with multi-indexing events from key_name
+    # TODO generate index the first time from key_name
+    # TODO reset the index after elements are removed or sorted
+    # TODO improve adding two samples together
+    # TODO deal with empty CTH events or empty CDC events
 # TODO improve CTH tigger logic to have time window
 # TODO improve CTH hits to sum over 10ns bins
-# TODO improve dealing with coincidence for CDC hits
 # TODO change all documentation
 
 def _is_sequence(arg):
@@ -144,6 +147,8 @@ class FlatHits(object):
 
         # Declare out lookup tables
         # TODO depreciate
+        # TODO implement key map that maps from key_name -> event_index and 
+        # depreciate the rest!
         self.hits_to_events = None
         self.event_to_hits = None
         self.event_to_n_hits = None
@@ -256,8 +261,11 @@ class FlatHits(object):
         '''
         Reset the hit and event indexes
         '''
-        self.data[self.hits_index_name] = np.arange(self.n_hits)
+        self.data[self.hits_index_name] =\
+            np.concatenate([np.arange(evts) for evts in self.event_to_n_hits])
         self.data[self.event_index_name] = self.hits_to_events
+        self.data.set_index([self.event_index_name, self.hits_index_name], 
+                             inplace=True, drop=True)
 
     # TODO depreciate
     def _reset_all_internal_data(self):
@@ -274,7 +282,9 @@ class FlatHits(object):
     # TODO depreciate
     def _reset_event_to_n_hits(self):
         # Find the hits to remove
-        self.event_to_n_hits = np.bincount(self.data[self.event_index_name],
+        #event_to_nhits = evt_index.value_counts(sort=False)
+        evt_index = self.data.index.droplevel(level=1)
+        self.event_to_n_hits = np.bincount(evt_index.values,
                                            minlength=self.n_events)
         # Remove these sums
         assert (self.event_to_n_hits >= 0).all(),\
@@ -316,7 +326,8 @@ class FlatHits(object):
         # Set the names of all branches
         self.all_branches = self._branches + list(self._e_branch_dict.keys())
         # Set the data for all the branches
-        self.data = np.rec.fromarrays(self.data, names=(self.all_branches))
+        self.data = dict(zip(self.all_branches, self.data))
+        self.data = pd.DataFrame.from_dict(self.data)
         # Generate the indexes
         self._generate_indexes()
 
@@ -332,7 +343,7 @@ class FlatHits(object):
             # Switch to a list if a single value is given
             if not _is_sequence(values):
                 values = [values]
-            this_mask = np.in1d(these_hits[variable], values)
+            this_mask = these_hits[variable].isin(values)
             mask = np.logical_and(mask, this_mask)
         if not greater_than is None:
             this_mask = these_hits[variable] > greater_than
@@ -367,7 +378,7 @@ class FlatHits(object):
             evt_hits = np.concatenate([self.event_to_hits[evt]\
                                        for evt in events])
         # Return the data for these events
-        return self.data[evt_hits]
+        return self.data.iloc[evt_hits]
 
     def trim_events(self, events):
         """
@@ -380,20 +391,15 @@ class FlatHits(object):
         Sorts the hits by the given variable inside each event.  By default,
         this is done in acending order and the hit index is reset after sorting.
         """
+        # Unpack the list of variables into one list
+        var_list = [self.event_index_name, variable]
+        if _is_sequence(variable):
+            var_list = [self.event_index_name, *variable]
         # Sort each event internally
-        for evt in range(self.n_events):
-            # Get the hits to sort
-            evt_hits = self.event_to_hits[evt]
-            # Get the sort order of the given variable
-            sort_order = self.data[evt_hits].argsort(order=variable)
-            # Reverse the order if required
-            if not ascending:
-                sort_order = sort_order[::-1]
-            # Rearrange the hits
-            self.data[evt_hits] = self.data[evt_hits][sort_order]
+        self.data.sort_values(var_list, ascending=ascending, inplace=True)
         # Reset the hit index
-        if reset_index:
-            self._generate_indexes()
+        #if reset_index:
+        #    self._generate_indexes()
 
     def filter_hits(self, variable, these_hits=None,
                     values=None, greater_than=None,
@@ -452,15 +458,6 @@ class FlatHits(object):
             elif prefixed_branch in all_names:
                 all_names.remove(prefixed_branch)
         self.data = self.data[all_names]
-
-    # TODO depreciate
-    def get_other_hits(self, hits):
-        """
-        Returns the hits from the same event(s) as the given hit list
-        """
-        events = self.hits_to_events[hits]
-        events = np.unique(events)
-        return self.get_events(events)
 
     def get_signal_hits(self, events=None):
         """
@@ -642,6 +639,7 @@ class GeomHits(FlatHits):
         """
         result = np.zeros(self.n_hits, dtype=int)
         # Get the background hits
+        # TODO change for dataframe
         bkg_hits = self.get_background_hits(events)[self.hits_index_name]
         result[bkg_hits] = 2
         # Get the signal hits
@@ -736,48 +734,24 @@ class CDCHits(GeomHits):
             * Taking a signal hit label if it exists on the channel
             * Taking the rest of the values from the earliest hit on the channel
         """
-        # Get the energy deposition summed
-        all_events = np.arange(self.n_events)
-        edep_sparse = scipy.sparse.lil_matrix((self.n_events,
-                                               self.geom.n_points))
-        sig_hit_sparse = scipy.sparse.lil_matrix((self.n_events,
-                                                  self.geom.n_points))
-        for evt in all_events:
-            # Get the wire_ids of the hit data
-            wire_ids = self.get_hit_vols(evt, unique=False)
-            # Get the summed energy deposition
-            edep = np.zeros((self.geom.n_points))
-            edep_meas = self.get_events(evt)[self.edep_name]
-            np.add.at(edep, wire_ids, edep_meas)
-            # Assign this to the sparse array
-            edep_sparse[evt, :] = edep
-            # Check if there is a signal on this hit
-            sig_hit = np.zeros((self.geom.n_points))
-            sig_hit_meas = self.get_events(evt)[self.hit_type_name] == \
-                          self.signal_coding
-            np.logical_or.at(sig_hit, wire_ids, sig_hit_meas)
-            # Assign this to the sparse array
-            sig_hit_sparse[evt, :] = sig_hit
-        # Sort by hit type name to keep the earliest hits
-        if sort_hits:
-            self.sort_hits(self.time_name, reset_index=True)
-        hit_indexes = self.get_measurement(self.hits_index_name, all_events)
-        # Remove the hits that are not needed
-        self.trim_hits(self.hits_index_name, values=hit_indexes)
-        all_events = np.arange(self.n_events)
-        # Get the wire_ids and event_ids of the hit data
-        wire_ids = self.get_hit_vols(all_events, unique=False)
-        # Map the evnt_ids to the minimal continous set
-        evnt_ids = np.repeat(np.arange(all_events.size),
-                             self.event_to_n_hits[all_events])
-        # Force the new edep and is_sig values onto the sample
-        hit_indexes = \
-            self.get_measurement(self.hits_index_name,
-                                       all_events).astype(int)
-        self.data[self.edep_name][hit_indexes] = \
-                edep_sparse[evnt_ids, wire_ids].toarray()
-        self.data[self.hit_type_name][hit_indexes] = \
-                sig_hit_sparse[evnt_ids, wire_ids].toarray()
+        # Sort the hits by channel and by time
+        self.sort_hits([self.flat_name, self.time_name])
+        # Group by the channels
+        chan_groups = self.data.groupby([self.event_index_name,
+                                         self.flat_name])
+        # Ensure we sum the energy deposition and keep the signal labels
+        agg_dict = {}
+        agg_dict[self.edep_name] = 'sum'
+        agg_dict[self.hit_type_name] = 'any'
+        # Evaluate the groups for these two special cases
+        _cached_vals = chan_groups.agg(agg_dict)
+        # Get the first element for the rest of the data
+        self.data = chan_groups.head(1)
+        # Reset the special data
+        self.data[[self.edep_name, self.hit_type_name]] = _cached_vals.values
+        # Sort the hits by time again
+        # TODO remove once over
+        self.sort_hits(self.time_name)
 
     def get_measurement(self, name, events=None, shift=None, default=0,
                         only_hits=True, flatten=False, use_sparse=False):
@@ -1064,6 +1038,7 @@ class CTHHits(GeomHits):
             if len(trig_vols) == 0:
                 continue
             # Find the hit indexes of all the volumes that have hits
+            # TODO change for dataframe
             trig_hits = self.filter_hits(self.flat_name,
                                          these_hits=self.get_events(event),
                                          values=trig_vols)[self.hits_index_name]
