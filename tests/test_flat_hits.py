@@ -72,6 +72,7 @@ def check_columns(sample, reference_data):
     ref_columns = sorted(list(reference_data.dtype.names))
     new_columns = sorted(list(sample.data.columns.values))
     miss_cols = list(set(new_columns) - set(ref_columns))
+    # TODO remove this index checker
     assert not miss_cols, "Columns in loaded sample are not found in "+\
         "reference sample \n{}".format("\n".join(miss_cols))
 
@@ -80,7 +81,8 @@ def check_data(sample, reference_data):
     Helper function to ensure all columns are imported
     """
     for col in sample.data.columns.values:
-        new_data = sample.data[col]
+        new_data = sample.data[col].values
+        print("Checking column:", col)
         ref_data = reference_data[col]
         assert_allclose(new_data, ref_data, err_msg=col)
 
@@ -202,7 +204,7 @@ def flat_hits(cstrct_hits_params):
                            prefix=prefix,
                            branches=branches)
     # Assign every 5th hit as signal
-    sample.data[sample.hit_type_name][::5] = bool(sample.signal_coding)
+    sample.data.loc[::5, sample.hit_type_name] = bool(True)
     return sample, file, geom, rqst_branches
 
 @pytest.fixture()
@@ -371,7 +373,7 @@ def test_flat_hits_subset(flat_hits_subset):
     sample_all, sample_sub, f_event, n_events = flat_hits_subset
     # Get information about the whole sample
     all_event_keys, all_n_hits = \
-        np.unique(sample_all.get_events()[sample_all.key_name],
+        np.unique(sample_all.get_events()[sample_all.evt_number],
                   return_counts=True)
     all_n_events = all_event_keys.shape[0]
     # Get the expected number of events and index of last event
@@ -380,7 +382,7 @@ def test_flat_hits_subset(flat_hits_subset):
     l_event = f_event + n_events
     # Get information about the subsample
     sub_event_keys, sub_n_hits = \
-        np.unique(sample_sub.get_events()[sample_sub.key_name],
+        np.unique(sample_sub.get_events()[sample_sub.evt_number],
                   return_counts=True)
     sub_n_events = sub_event_keys.shape[0]
     # Ensure the right number of events are returned
@@ -498,7 +500,7 @@ def test_get_signal_hits(events_and_ref_data):
     # Unpack the data
     sample, ref_data, events = events_and_ref_data
     event_data = sample.get_signal_hits(events)
-    test_ref = ref_data[ref_data[sample.hit_type_name] == sample.signal_coding]
+    test_ref = ref_data[ref_data[sample.hit_type_name] == True]
     for branch in sample.data.columns.values:
         assert_allclose(test_ref[branch], event_data[branch])
 
@@ -509,7 +511,7 @@ def test_get_background_hits(events_and_ref_data):
     # Unpack the data
     sample, ref_data, events = events_and_ref_data
     event_data = sample.get_background_hits(events)
-    test_ref = ref_data[ref_data[sample.hit_type_name] != sample.signal_coding]
+    test_ref = ref_data[ref_data[sample.hit_type_name] != True]
     for branch in sample.data.columns.values:
         assert_allclose(test_ref[branch], event_data[branch])
 

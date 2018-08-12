@@ -79,7 +79,7 @@ def cdc_hits(cstrct_cdc_hits_params):
                           prefix=prefix,
                           branches=branches)
     # Randomly assign every 5th hit as a signal hit
-    sample.data[sample.hit_type_name][::5] = bool(sample.signal_coding)
+    sample.data.loc[::5, sample.hit_type_name] = bool(True)
     return sample, file, geom, rqst_branches
 
 @pytest.fixture()
@@ -223,7 +223,7 @@ def cth_hits(cstrct_cth_hits_params):
                           prefix=prefix,
                           branches=branches)
     # Randomly assign every 5th hit as a signal hit
-    sample.data[sample.hit_type_name][::5] = bool(sample.signal_coding)
+    sample.data[sample.hit_type_name][::5] = True
     return sample, file, geom, rqst_branches
 
 @pytest.fixture()
@@ -289,7 +289,6 @@ def test_cth_get_events(cth_hits, hodoscope):
     reference_file = file+"_"+geom+"_getevents_"+hodoscope+".npz"
     # Generate the reference here if needed
     sample_data = sample.get_events(list(range(3)), hodoscope=hodoscope)
-    print(len(sample.data.columns.values))
     if GENERATE_REFERENCE:
         generate_reference(reference_file,
                            sample_data,

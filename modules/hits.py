@@ -7,14 +7,13 @@ Notation used below:
 from __future__ import print_function
 from collections import OrderedDict
 import numpy as np
-import scipy
 from root_numpy import root2array, list_branches
-from cylinder import CDC, CTH
 import pandas as pd
+from cylinder import CDC, CTH
 
 # TODO swith to pandas
-# TODO deal with multi-indexing events from key_name
-    # TODO generate index the first time from key_name
+# TODO deal with multi-indexing events from evt_number
+    # TODO generate index the first time from evt_number
     # TODO reset the index after elements are removed or sorted
     # TODO improve adding two samples together
     # TODO deal with empty CTH events or empty CDC events
@@ -103,33 +102,27 @@ class FlatHits(object):
                  branches=None,
                  empty_branches=None,
                  hit_type_name="IsSig",
-                 key_name="EventNumber",
-                 signal_coding=True):
+                 evt_number="EventNumber",
+                 hit_number="HitNumber"):
         # TODO fill in docs
         """
         """
         # Column naming and signal labelling conventions
         # The prefix comes before all column names
         self.prefix = prefix
-        # The key name determines the original event of the hit
-        self.key_name = self.prefix + key_name
+        # The event and hit numbers determines the origin of the datum in the
+        # input data files
+        self.evt_number = self.prefix + evt_number
+        self.hit_number = self.prefix + hit_number
         # The hit type name denotes if the hit is signal or not
         self.hit_type_name = self.prefix + hit_type_name
         # Each hit by hit ID and by event index, where event index is contiguous
         # and starts from zero
-        self.hits_index_name = self.prefix + "hits_index"
-        self.event_index_name = self.prefix + "event_index"
+        self.hits_index_name = "hits_index"
+        self.event_index_name = "event_index"
 
         # The selection controls which hits are imported
         self.selection = selection
-        # Determines what value of hit type corresponds to a signal
-        self.signal_coding = signal_coding
-
-        # Initialize the data to none, this will be filled later
-        self.data = None
-        # Declare the counters
-        self.n_hits = None
-        self.n_events = None
 
         # Ensure we have a list type of branches and empty branches
         _empty_branches = _return_branches_as_list(empty_branches)
@@ -140,28 +133,24 @@ class FlatHits(object):
                            for b in _empty_branches]
         self._e_branch_dict = {b : typ for b, typ in _empty_branches}
         # Add the branches as we expect
-        self._branches += [self.hit_type_name, self.key_name]
+        self._branches += [self.hit_type_name, self.evt_number]
         # Add the indexes as integers
         self._e_branch_dict[self.hits_index_name] = np.uint32
         self._e_branch_dict[self.event_index_name] = np.uint32
 
-        # Declare out lookup tables
-        # TODO depreciate
-        # TODO implement key map that maps from key_name -> event_index and 
-        # depreciate the rest!
-        self.hits_to_events = None
-        self.event_to_hits = None
-        self.event_to_n_hits = None
         # Get the number of hits for each event, limiting this lookup table if
         # we only want a subset of events
-        self._first_hit = None
-        self._generate_event_to_n_hits_table(path, tree, first_event, n_events)
-        # Fill the look up tables
-        self._generate_lookup_tables()
-        # Fill the counters
-        self._generate_counters()
+        self.n_events, self.n_hits, _hit_sel_str = \
+            self._count_hits_events(path, tree, first_event, n_events)
+        # Add the hit selection into the selection string
+        if _hit_sel_str:
+            if self.selection is not None:
+                self.selection += " && " + _hit_sel_str
+            else:
+                self.selection = _hit_sel_str
         # Finialize the data into the data structures
-        self._finalize_data(path, tree)
+        self.data = self._finalize_data(path, tree)
+        self._reset_indexes(construction=True)
 
     def _import_root_file(self, path, tree, branches, single_perc=True):
         """
@@ -177,17 +166,13 @@ class FlatHits(object):
             branches = [branches]
         # Check the branches we want are there
         check_for_branches(path, tree, branches)
-        # Temporary variable to index the last hit
-        _l_hit = self._first_hit + self.n_hits
         # Import all the data
         _data = []
         for branch in branches:
             # Import the branch
             _b_data = root2array(path, treename=tree,
                                  branches=[branch],
-                                 selection=self.selection)
-            # Unstructure the data and limit the number of hits
-            _b_data = _b_data[branch][self._first_hit:_l_hit]
+                                 selection=self.selection)[branch]
             # Convert to single percision if needed
             if _b_data.dtype == np.float64 and single_perc:
                 _b_data = _b_data.astype(np.float32)
@@ -196,111 +181,83 @@ class FlatHits(object):
         # Return a list of arrays
         return _data
 
-    # TODO depreciate
-    def _generate_event_to_n_hits_table(self, path, tree,
-                                        first_event=0, n_events=None):
+    def _count_hits_events(self, path, tree, first_event=0, n_events=None):
         """
         Creates look up tables to map from event index to number of hits from
         the root files
         """
         # Check the branch we need to define the number of hits is there
-        check_for_branches(path, tree, branches=[self.key_name])
+        _import_branches = [self.evt_number]
+        check_for_branches(path, tree, branches=_import_branches)
         # Import the data
-        event_data = root2array(path, treename=tree,
-                                branches=[self.key_name],
-                                selection=self.selection)
-        event_data = event_data[self.key_name]
+        e_data = root2array(path, treename=tree,
+                            branches=_import_branches,
+                            selection=self.selection)[self.evt_number]
         # Check the hits are sorted by event
-        assert np.array_equal(event_data, np.sort(event_data)),\
-            "Event index named {} not sorted".format(self.key_name)
+        assert np.array_equal(e_data, np.sort(e_data)),\
+            "Event index named {} not sorted".format(self.evt_number)
         # Return the number of hits in each event
-        _, event_to_n_hits = np.unique(event_data, return_counts=True)
-        # Set the internal table to this value
-        self.event_to_n_hits = event_to_n_hits
-        # Trim this lookup table to only include events of interest
-        # the events
-        self._first_hit = np.sum(self.event_to_n_hits[:first_event])
-        self.event_to_n_hits = self.event_to_n_hits[first_event:]
-        if n_events is not None:
-            # If we want a subset of events, then import a subset
-            self.event_to_n_hits = self.event_to_n_hits[:n_events]
+        _, evt_n_hits = np.unique(e_data, return_counts=True)
+        # Denote which hits will be imported as a selection string so it plays
+        # nice with other selection strings
+        _hit_sel = []
+        # Default case for the last event number of events, which defaults to
+        # all remaining events (i.e. index of None)
+        last_event = n_events
+        if first_event != 0:
+            # Incriment the index of the last event so that it equals
+            # n_events + first_event if both are defined, or remains None
+            # otherwsie
+            if last_event is not None:
+                last_event += first_event
+            # Select the first hit from this event
+            sel = "({} >= {})".format(self.evt_number,
+                                      e_data[np.sum(evt_n_hits[:first_event])])
+            _hit_sel += [sel]
+        # Check which the last is
+        if last_event is not None:
+            # Get the last hit and add it to the selection
+            sel = "({} < {})".format(self.evt_number,
+                                     e_data[np.sum(evt_n_hits[:last_event])])
+            _hit_sel += [sel]
+        # Remove the events we don't care about
+        evt_n_hits = evt_n_hits[first_event:last_event]
+        # Return the number of events, the number of hits, and the hit selection
+        # information
+        return evt_n_hits.shape[0], np.sum(evt_n_hits), " && ".join(_hit_sel)
 
-    # TODO depreciate
-    def _generate_lookup_tables(self):
-        """
-        Generate mappings between hits and events from current event_to_n_hits
-        """
-        # Build the look up tables
-        first_hit = 0
-        hits_to_events = np.zeros(sum(self.event_to_n_hits))
-        event_to_hits = []
-        for event, n_hits in enumerate(self.event_to_n_hits):
-            # Record the last hit in the event
-            last_hit = first_hit + n_hits
-            # Record the range of hit IDs
-            event_to_hits.append(np.arange(first_hit, last_hit))
-            # Record the event of each hit
-            hits_to_events[first_hit:last_hit] = event
-            # Shift to the next event
-            first_hit = last_hit
-        # Shift the event-to-hit list into a numpy object array
-        self.event_to_hits = np.array(event_to_hits)
-        # Ensure all indexes in hits to events are integers
-        self.hits_to_events = hits_to_events.astype(int)
-
-    # TODO depreciate
-    def _generate_counters(self):
-        """
-        Generate the number of events and number of hits
-        """
-        self.n_hits = len(self.hits_to_events)
-        self.n_events = len(self.event_to_n_hits)
-
-    # TODO depreciate
-    def _generate_indexes(self):
+    def _reset_indexes(self, construction=False):
         '''
-        Reset the hit and event indexes
         '''
-        self.data[self.hits_index_name] =\
-            np.concatenate([np.arange(evts) for evts in self.event_to_n_hits])
-        self.data[self.event_index_name] = self.hits_to_events
-        self.data.set_index([self.event_index_name, self.hits_index_name], 
+        # Initialize the variable
+        evt_index = None
+        # If this is the first time the indexes are set, use the evt_number to
+        # generate the number of hits per event
+        if construction:
+            evt_index = self.data[self.evt_number].values
+        # If its not the first time, use the existing event index
+        else:
+            # Sort the hits by existing event index
+            evt_index = self.data.index.droplevel(level=self.hits_index_name).values
+        # Check the hits are sorted by event as far as the key value is
+        # concernted
+        assert np.array_equal(evt_index, np.sort(evt_index)),\
+            "Event index named {} not sorted".format(self.evt_number)
+        # If so, get the unique values
+        _, hits_to_events, event_to_n_hits =\
+            np.unique (evt_index, return_inverse=True, return_counts=True)
+        # Set the event index
+        # TODO maybe could use return_inverse here instead of unique-repeat
+        self.data[self.event_index_name] =\
+            np.repeat(np.arange(event_to_n_hits.shape[0]), event_to_n_hits)
+        # Set the hit index
+        self.data[self.hits_index_name] = hits_to_events
+        # Set the indexes on the data frame
+        self.data.set_index([self.event_index_name, self.hits_index_name],
                              inplace=True, drop=True)
-
-    # TODO depreciate
-    def _reset_all_internal_data(self):
-        """
-        Reset all look up tables, indexes, and counts
-        """
-        # Reset the look up tables from the current event_to_n_hits table
-        self._generate_lookup_tables()
-        # Set the number of hits and events for this data
-        self._generate_counters()
-        # Set the indexes
-        self._generate_indexes()
-
-    # TODO depreciate
-    def _reset_event_to_n_hits(self):
-        # Find the hits to remove
-        #event_to_nhits = evt_index.value_counts(sort=False)
-        evt_index = self.data.index.droplevel(level=1)
-        self.event_to_n_hits = np.bincount(evt_index.values,
-                                           minlength=self.n_events)
-        # Remove these sums
-        assert (self.event_to_n_hits >= 0).all(),\
-                "Negative number of hits not allowed!"
-        # Trim the look up tables of empty events
-        empty_events = np.where(self.event_to_n_hits > 0)[0]
-        self._trim_lookup_tables(empty_events)
-
-    def _trim_lookup_tables(self, events):
-        """
-        Trim the lookup tables to the given event indexes
-        """
-        # Trim the event indexed tables
-        self.event_to_n_hits = self.event_to_n_hits[events]
-        # Set the lookup tables
-        self._reset_all_internal_data()
+        # Set the number of hits and events as well
+        self.n_hits = hits_to_events.shape[0]
+        self.n_events = event_to_n_hits.shape[0]
 
     def _finalize_data(self, path, tree):
         """
@@ -316,20 +273,23 @@ class FlatHits(object):
         assert not in_both, "Column(s) trying to be imported both as an empty"+\
             " branch and as a data branch\n{}".format("\n".join(in_both))
         # Import the branches we expect
-        self.data = self._import_root_file(path, tree,
-                                           branches=self._branches)
+        _data = self._import_root_file(path, tree, branches=self._branches)
         # Remember the order of these branches
         self.all_branches = self._branches
         # Add the empty data that will be filled
-        self.data += [np.zeros(self.n_hits).astype(typ)
-                      for typ in self._e_branch_dict.values()]
+        _data += [np.zeros(self.n_hits, dtype=typ)
+                  for typ in self._e_branch_dict.values()]
         # Set the names of all branches
         self.all_branches = self._branches + list(self._e_branch_dict.keys())
-        # Set the data for all the branches
-        self.data = dict(zip(self.all_branches, self.data))
-        self.data = pd.DataFrame.from_dict(self.data)
-        # Generate the indexes
-        self._generate_indexes()
+        # Return the data as a pandas DataFrame
+        try:
+            return pd.DataFrame.from_dict(dict(zip(self.all_branches, _data)))
+        except ValueError:
+            # Anticipate arrays of different lengths
+            b_shape = ["{}, {}".format(_b, _d.shape)
+                       for _b, _d in zip(self.all_branches, _data)]
+            print("\n".join(b_shape))
+            raise ValueError
 
     def _get_mask(self, these_hits, variable, values=None, greater_than=None,
                   less_than=None, invert=False):
@@ -355,51 +315,43 @@ class FlatHits(object):
             mask = np.logical_not(mask)
         return mask
 
-    def get_events(self, events=None, unique=True):
+    def get_events(self, events=None):
         """
         Returns the hits from the given event(s).  Default gets all events
 
         :param unique: Force each event to only be retrieved once
         """
-        # Check if we want all events
+        # Return the data for these events
         if events is None:
             return self.data
-        # Allow for a single event
-        if not _is_sequence(events):
-            evt_hits = self.event_to_hits[events]
-        # Otherwise assume it is a list of events.
-        else:
-            # Ensure we only get each event once
-            # TODO remove and check that this is fine.  Sorts the event ids
-            # before returning them.  This is bad
-            if unique:
-                events = np.unique(events)
-            # Get all the hits we want as flat
-            evt_hits = np.concatenate([self.event_to_hits[evt]\
-                                       for evt in events])
-        # Return the data for these events
-        return self.data.iloc[evt_hits]
+        # Return all events by default
+        return self.data.loc[events]
 
     def trim_events(self, events):
         """
         Keep these events in the data
         """
-        self.trim_hits(self.key_name, values=events)
+        self.trim_hits(self.evt_number, values=events)
 
-    def sort_hits(self, variable, ascending=True, reset_index=True):
+    def sort_hits(self, variable=None, ascending=True, reset_index=True):
         """
         Sorts the hits by the given variable inside each event.  By default,
         this is done in acending order and the hit index is reset after sorting.
         """
-        # Unpack the list of variables into one list
-        var_list = [self.event_index_name, variable]
-        if _is_sequence(variable):
-            var_list = [self.event_index_name, *variable]
+        # Always sort by event index
+        var_list = [self.event_index_name]
+        # If variable(s), sort by this variable as well
+        if variable is not None:
+            # Unpack it if its a sequence
+            if _is_sequence(variable):
+                var_list = [self.event_index_name, *variable]
+            else:
+                var_list = [self.event_index_name, variable]
         # Sort each event internally
         self.data.sort_values(var_list, ascending=ascending, inplace=True)
         # Reset the hit index
-        #if reset_index:
-        #    self._generate_indexes()
+        if reset_index:
+            self._reset_indexes()
 
     def filter_hits(self, variable, these_hits=None,
                     values=None, greater_than=None,
@@ -430,7 +382,7 @@ class FlatHits(object):
                                      greater_than=greater_than,
                                      less_than=less_than,
                                      invert=invert)
-        self._reset_event_to_n_hits()
+        self._reset_indexes()
 
     def add_hits(self, hits, event_indexes=None):
         """
@@ -467,7 +419,7 @@ class FlatHits(object):
         # Get the events
         these_hits = self.filter_hits(self.hit_type_name,
                                       these_hits=self.get_events(events),
-                                      values=self.signal_coding)
+                                      values=True)
         return these_hits
 
     def get_background_hits(self, events=None):
@@ -477,7 +429,7 @@ class FlatHits(object):
         """
         these_hits = self.filter_hits(self.hit_type_name,
                                       these_hits=self.get_events(events),
-                                      values=self.signal_coding,
+                                      values=True,
                                       invert=True)
         return these_hits
 
@@ -517,8 +469,6 @@ class GeomHits(FlatHits):
         :param hit_type_name: name of the branch that determines hit type
         :param n_hit_name: name of branch that gives the number of hits in each
                            event
-        :param signal_coding: value in hit_type_name branch that signifies a
-                              signal hit
         """
         # Name the trigger data row
         self.trig_name = prefix + trig_name
@@ -710,8 +660,6 @@ class CDCHits(GeomHits):
         :param hit_type_name: name of the branch that determines hit type
         :param n_hit_name: name of branch that gives the number of hits in each
                            event
-        :param signal_coding: value in hit_type_name branch that signifies a
-                              signal hit
         """
         # Add the flat name to the branches
         branches = _return_branches_as_list(branches) + [prefix + flat_name]
@@ -754,8 +702,14 @@ class CDCHits(GeomHits):
         # TODO remove once over
         self.sort_hits(self.time_name)
 
-    def get_measurement(self, name, events=None, shift=None, default=0,
-                        only_hits=True, flatten=False, use_sparse=False):
+    def get_measurement(self, name,
+                        events=None, 
+                        shift=None,
+                        default=0,
+                        dtype=float,
+                        only_hits=True,
+                        flatten=False,
+                        use_sparse=False):
         """
         Returns requested measurement in volumes, returning the default value if
         the hit does not register this measurement
@@ -769,37 +723,28 @@ class CDCHits(GeomHits):
         if events is None:
             events = np.arange(self.n_events)
         # Make it an iterable
-        my_events = events
-        if not _is_sequence(my_events):
-            my_events = [my_events]
+        _evts = events
+        if not _is_sequence(_evts):
+            _evts = [_evts]
         # Get the events as an array
-        my_events = np.sort(np.array(my_events))
+        _evts = np.sort(np.array(_evts))
         # Select the relevant event from data
-        meas = self.get_events(my_events)[name]
+        meas = self.get_events(_evts).groupby([self.event_index_name,
+                                               self.flat_name]).head(1)
+        # Return this if we don't want the geometry to come too
+        if only_hits:
+            return meas[name].values
         # Get the wire_ids and event_ids of the hit data
-        wire_ids = self.get_hit_vols(my_events, unique=False)
+        wire_ids = meas[self.flat_name].values
         # Map the evnt_ids to the minimal continous set
-        evnt_ids = np.repeat(np.arange(my_events.size),
-                             self.event_to_n_hits[my_events])
+        evnt_ids = meas.index.droplevel(level=self.hits_index_name).values
+        _, evnt_ids = np.unique(evnt_ids, return_inverse=True)
         # Get the default values
-        result = default*np.ones((my_events.size, self.geom.n_points),
-                                  dtype=float)
-        # Figure out the first place each wire id is mentioned in each event
-        two_d_ids = np.vstack([evnt_ids, wire_ids]).T
-        # Get the unique evt_id/wire_id values
-        one_d_view = np.ascontiguousarray(two_d_ids).view(
-            np.dtype((np.void, two_d_ids.dtype.itemsize * two_d_ids.shape[1])))
-        # Figure out where they appear
-        _, first_hits = np.unique(one_d_view, return_index=True)
-        # Map their appearances back in the correct order
-        evnt_ids, wire_ids = two_d_ids[np.sort(first_hits)].T
-        meas = meas[np.sort(first_hits)]
-        # Put the result on the correct wires
-        result[evnt_ids, wire_ids] = meas
+        result = default*np.ones((_evts.size, self.geom.n_points), dtype=dtype)
+        # Map this back on to the actual values
+        result[evnt_ids, wire_ids] = meas[name].values
         if shift is not None:
             result = result[:, self.geom.shift_wires(shift)]
-        if only_hits:
-            result = result[evnt_ids, wire_ids]
         if flatten:
             result = result.flatten()
         if use_sparse:
@@ -867,7 +812,7 @@ class CDCHits(GeomHits):
         good_event_idx = np.where(evt_max >= min_layer)
         # TODO these should not return key name, this is dangeous for hit
         # merging
-        return np.unique(self.get_events(events=good_event_idx)[self.key_name])
+        return np.unique(self.get_events(events=good_event_idx)[self.evt_number])
 
     def min_hits_cut(self, min_hits):
         """
@@ -877,7 +822,7 @@ class CDCHits(GeomHits):
         good_events = np.where(self.event_to_n_hits >= min_hits)[0]
         # TODO these should not return key name, this is dangeous for hit
         # merging
-        return np.unique(self.get_events(events=good_events)[self.key_name])
+        return np.unique(self.get_events(events=good_events)[self.evt_number])
 
     def get_occupancy(self):
         """
@@ -935,8 +880,6 @@ class CTHHits(GeomHits):
         :param hit_type_name: name of the branch that determines hit type
         :param n_hit_name: name of branch that gives the number of hits in each
                            event
-        :param signal_coding: value in hit_type_name branch that signifies a
-                              signal hit
         """
         # Add the flat name as an empty branch
         empty_branches = _return_branches_as_list(empty_branches)
@@ -1078,7 +1021,7 @@ class CTHHits(GeomHits):
         """
         # Find the hit indexes of all the volumes that have hits
         # TODO have this not return keyname, this is dangerous for hit merging
-        return np.unique(self.data[self.get_trig_hits(events)][self.key_name])
+        return np.unique(self.data[self.get_trig_hits(events)][self.evt_number])
 
     def get_trig_vector(self, events):
         """
@@ -1119,8 +1062,8 @@ class CyDetHits(FlatHits):
         """
         Trim all events by event index so that they have the same events
         """
-        shared_evts = np.intersect1d(self.cdc.get_events()[self.cdc.key_name],
-                                     self.cth.get_events()[self.cth.key_name])
+        shared_evts = np.intersect1d(self.cdc.get_events()[self.cdc.evt_number],
+                                     self.cth.get_events()[self.cth.evt_number])
         self.trim_events(shared_evts)
 
     def set_trigger_time(self):
