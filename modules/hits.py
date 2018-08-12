@@ -748,7 +748,8 @@ class CDCHits(GeomHits):
         # Get the first element for the rest of the data
         self.data = chan_groups.head(1)
         # Reset the special data
-        self.data[[self.edep_name, self.hit_type_name]] = _cached_vals.values
+        self.data[[self.edep_name, self.hit_type_name]] = \
+            _cached_vals[[self.edep_name, self.hit_type_name]].values
         # Sort the hits by time again
         # TODO remove once over
         self.sort_hits(self.time_name)

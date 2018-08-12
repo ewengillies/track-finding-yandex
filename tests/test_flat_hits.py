@@ -24,13 +24,16 @@ NAMES["CTH"] = ("CTHHitTree", "CTHHit.f")
 # some specific test branches for when they are needed
 BRANCHES = ['Track.fStartMomentum.fX',
             'Track.fStartMomentum.fY',
-            'Track.fStartMomentum.fZ']
+            'Track.fStartMomentum.fZ',
+            'MCPos.fP.fX',
+            'MCPos.fP.fY',
+            'MCPos.fP.fZ']
 # Turn this on if we want to regenerate the reference sample
 GENERATE_REFERENCE = False
 # Number of branches expected for reference samples
 N_BRANCHES = {}
-N_BRANCHES["CDC"] = 36
-N_BRANCHES["CTH"] = 34
+N_BRANCHES["CDC"] = 34
+N_BRANCHES["CTH"] = 32
 
 
 # HELPER FUNCTIONS #############################################################
@@ -38,8 +41,13 @@ N_BRANCHES["CTH"] = 34
 def generate_reference(reference_file, sample, n_branches, desired_branches):
     # Generate the largest sample of reference data possible
     if n_branches == desired_branches:
-        np.savez(reference_file, array=sample)
-        raise AssertionError("Generated new reference, test is tautological")
+        # Try to convert it to records if its a pandas DF
+        try:
+            np.savez(reference_file, array=sample.to_records(index=False))
+        # Otherwise assume its already a numpy array
+        except AttributeError:
+            np.savez(reference_file, array=sample)
+        #raise AssertionError("Generated new reference, test is tautological")
 
 def filter_branches(branches):
     """
@@ -506,8 +514,8 @@ def test_get_background_hits(events_and_ref_data):
         assert_allclose(test_ref[branch], event_data[branch])
 
 @pytest.mark.parametrize("sort_branch, ascending", [
-    (BRANCHES[0], True),
-    (BRANCHES[2], True)
+    ([BRANCHES[0], BRANCHES[4], BRANCHES[2]], True),
+    ([BRANCHES[3], BRANCHES[1], BRANCHES[5]], True),
     ])
 def test_sort_hits(events_and_ref_data, sort_branch, ascending):
     """
@@ -516,10 +524,10 @@ def test_sort_hits(events_and_ref_data, sort_branch, ascending):
     # Unpack the data
     sample, ref_data, events = events_and_ref_data
     # Get the branch names
-    evt_branch = sample.prefix+"event_index"
-    sort_branch = sample.prefix+sort_branch
+    evt_branch = sample.prefix+"EventNumber"
+    sort_branch = [sample.prefix+srt for srt in sort_branch]
     # Sort the data
-    test_ref = np.sort(ref_data, order=[evt_branch, sort_branch])
+    test_ref = np.sort(ref_data, order=[evt_branch, *sort_branch])
     sample.sort_hits(sort_branch, ascending=ascending)
     event_data = sample.get_events(events)
     # Check that it worked

@@ -18,8 +18,8 @@ import hits
 
 # Number of branches expected for reference samples
 N_BRANCHES = {}
-N_BRANCHES["CDC"] = 39
-N_BRANCHES["CTH"] = 38
+N_BRANCHES["CDC"] = 37
+N_BRANCHES["CTH"] = 36
 
 # CONSTRUCTOR FIXTURES #########################################################
 
