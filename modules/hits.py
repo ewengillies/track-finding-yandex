@@ -13,8 +13,6 @@ from cylinder import CDC, CTH
 
 # TODO swith to pandas
 # TODO deal with multi-indexing events from evt_number
-    # TODO generate index the first time from evt_number
-    # TODO reset the index after elements are removed or sorted
     # TODO improve adding two samples together
     # TODO deal with empty CTH events or empty CDC events
 # TODO improve CTH tigger logic to have time window

@@ -9,7 +9,7 @@ from numpy.testing import assert_allclose
 sys.path.insert(0, "../modules")
 from root_numpy import list_branches
 import hits
-from hits import check_for_branches, _add_name_to_branches
+from hits import check_for_branches, _add_name_to_branches, _is_sequence
 
 # Pylint settings
 # pylint: disable=redefined-outer-name
@@ -492,6 +492,43 @@ def test_get_event(events_and_ref_data):
     event_data = sample.get_events(events)
     for branch in sample.data.columns.values:
         assert_allclose(ref_data[branch], event_data[branch])
+
+@pytest.mark.parametrize("remove_event", [0, 1, 5, 10])
+def test_reindex_event(events_and_ref_data, remove_event):
+    """
+    Test if removing an event and reindexing the event list does not
+    affect what data is stored
+    """
+    # Unpack the data
+    sample, _, events = events_and_ref_data
+    # Record the shape of the event before
+    shape_before = sample.data.shape
+    # If the reqested events are None, return them as a range of (all)
+    if events is None:
+        events = np.arange(sample.n_events)
+    # Make them a list if they are not a list
+    if not _is_sequence(events):
+        events = [events]
+    # If the removed event is the request event, remove it.  Otherwise, leave it
+    events = [evt for evt in events if not evt == remove_event]
+    event_data_before = sample.get_events(events)
+    # Remove the event from the sample
+    ## hack that exploits the fact that evt_number == event_index + 1 in
+    ## the test file
+    sample.trim_hits(sample.evt_number, values=remove_event+1, invert=True)
+    # Ensure the data is actually different now
+    assert shape_before != sample.data.shape,\
+        "No events have been removed, since the shapes are the same "+\
+        "\n Shape before {}".format(shape_before)+\
+        "\n Shape before {}".format(sample.data.shape)
+    # Scroll through the events. If the removed event is after the
+    # reqested event, this event index must be decrimented. Otherwise, leave it
+    events = [evt - 1 if evt > remove_event else evt for evt in events]
+    event_data_after = sample.get_events(events)
+    for branch in sample.data.columns.values:
+        assert_allclose(event_data_before[branch],
+                        event_data_after[branch],
+                        err_msg=branch)
 
 def test_get_signal_hits(events_and_ref_data):
     """
