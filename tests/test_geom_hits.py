@@ -6,6 +6,7 @@ import sys
 from root_numpy import list_branches
 import pytest
 import numpy as np
+from numpy.testing import assert_allclose
 from test_flat_hits import check_columns, check_data,\
                            filter_branches, generate_reference
 from test_flat_hits import FILES, NAMES, BRANCHES, GENERATE_REFERENCE
@@ -94,7 +95,7 @@ def cdc_hits_and_ref(cdc_hits):
     if GENERATE_REFERENCE:
         generate_reference(reference_file,
                            sample.data,
-                           len(sample.data.dtype.names),
+                           len(sample.data.columns.values),
                            N_BRANCHES[geom])
     reference_data = np.load(reference_file)["array"]
     # Return the information
@@ -109,8 +110,9 @@ def test_all_cdc_branches_present(cdc_hits_and_ref):
     # Ensure we have the right number of branches if we requested all of them
     if rqst_branches == 'all':
         ref_branches = reference_data.dtype.names
-        smp_branches = sample.data.dtype.names
+        smp_branches = sample.data.columns.values
         miss = [b for b in ref_branches if b not in smp_branches]
+        miss = [b for b in miss if "_index" not in b]
         assert not miss,\
             "Requested all branches, but did not find {}".format("\n".join(miss))
 
@@ -163,13 +165,14 @@ def test_remove_coincidence(cdc_hits):
     if GENERATE_REFERENCE:
         generate_reference(ref_file,
                            sample_data,
-                           len(sample.data.dtype.names),
+                           len(sample.data.columns.values),
                            N_BRANCHES[geom])
     # Load the reference data
     ref_data = np.load(ref_file)["array"]
     # Check its all the same
-    for col in sample.data.dtype.names:
-        np.testing.assert_allclose(sample_data[col], ref_data[col], err_msg=col)
+    for col in sample.data.columns.values:
+        assert_allclose(sample_data[col], ref_data[col], err_msg=col)
+        print("PASSED : ", col)
 
 def test_get_measurement(cdc_hits, cdc_meas_params):
     """
@@ -192,12 +195,12 @@ def test_get_measurement(cdc_hits, cdc_meas_params):
     if GENERATE_REFERENCE:
         generate_reference(ref_file,
                            sample_data,
-                           len(sample.data.dtype.names),
+                           len(sample.data.columns.values),
                            N_BRANCHES[geom])
     # Load the reference data
     ref_data = np.load(ref_file)["array"]
     # Check its all the same
-    np.testing.assert_allclose(sample_data, ref_data, err_msg=var)
+    assert_allclose(sample_data, ref_data, err_msg=var)
 
 # TEST CTH HITS ################################################################
 
@@ -236,7 +239,7 @@ def cth_hits_and_ref(cth_hits):
     if GENERATE_REFERENCE:
         generate_reference(reference_file,
                            sample.data,
-                           len(sample.data.dtype.names),
+                           len(sample.data.columns.values),
                            N_BRANCHES[geom])
     reference_data = np.load(reference_file)["array"]
     # Return the information
@@ -251,8 +254,9 @@ def test_all_cth_branches_present(cth_hits_and_ref):
     # Ensure we have the right number of branches if we requested all of them
     if rqst_branches == 'all':
         ref_branches = reference_data.dtype.names
-        smp_branches = sample.data.dtype.names
+        smp_branches = sample.data.columns.values
         miss = [b for b in ref_branches if b not in smp_branches]
+        miss = [b for b in miss if "_index" not in b]
         assert not miss,\
             "Requested all branches, but did not find {}".format("\n".join(miss))
 
@@ -285,12 +289,12 @@ def test_cth_get_events(cth_hits, hodoscope):
     reference_file = file+"_"+geom+"_getevents_"+hodoscope+".npz"
     # Generate the reference here if needed
     sample_data = sample.get_events(list(range(3)), hodoscope=hodoscope)
-    print(len(sample.data.dtype.names))
+    print(len(sample.data.columns.values))
     if GENERATE_REFERENCE:
         generate_reference(reference_file,
                            sample_data,
-                           len(sample.data.dtype.names),
+                           len(sample.data.columns.values),
                            N_BRANCHES[geom])
     ref_data = np.load(reference_file)["array"]
-    for col in sample.data.dtype.names:
-        np.testing.assert_allclose(sample_data[col], ref_data[col], err_msg=col)
+    for col in sample.data.columns.values:
+        assert_allclose(sample_data[col], ref_data[col], err_msg=col)

@@ -61,10 +61,8 @@ def check_columns(sample, reference_data):
     """
     Helper function to ensure all columns are imported
     """
-    ref_columns = list(reference_data.dtype.names)
-    ref_columns.sort()
-    new_columns = list(sample.data.dtype.names)
-    new_columns.sort()
+    ref_columns = sorted(list(reference_data.dtype.names))
+    new_columns = sorted(list(sample.data.columns.values))
     miss_cols = list(set(new_columns) - set(ref_columns))
     assert not miss_cols, "Columns in loaded sample are not found in "+\
         "reference sample \n{}".format("\n".join(miss_cols))
@@ -73,7 +71,7 @@ def check_data(sample, reference_data):
     """
     Helper function to ensure all columns are imported
     """
-    for col in sample.data.dtype.names:
+    for col in sample.data.columns.values:
         new_data = sample.data[col]
         ref_data = reference_data[col]
         assert_allclose(new_data, ref_data, err_msg=col)
@@ -210,7 +208,7 @@ def flat_hits_and_ref(flat_hits):
     reference_file = file+"_"+geom+".npz"
     # Generate the referece file if needed
     if GENERATE_REFERENCE:
-        n_branches = len(sample.data.dtype.names)
+        n_branches = len(sample.data.columns.values)
         generate_reference(reference_file,
                            sample.data,
                            n_branches,
@@ -228,8 +226,10 @@ def test_all_branches_present(flat_hits_and_ref):
     # Ensure we have the right number of branches if we requested all of them
     if rqst_branches == 'all':
         ref_branches = reference_data.dtype.names
-        smp_branches = sample.data.dtype.names
+        smp_branches = sample.data.columns.values
         miss = [b for b in ref_branches if b not in smp_branches]
+        # TODO remove this index checker
+        miss = [b for b in miss if "_index" not in b]
         assert not miss,\
             "Requested all branches, but did not find {}".format("\n".join(miss))
 
@@ -390,7 +390,7 @@ def test_flat_hits_subset(flat_hits_subset):
     # Ensure the event data looks the same
     data_all = sample_all.get_events(events=np.arange(f_event, l_event))
     data_sub = sample_sub.get_events()
-    for col in data_sub.dtype.names:
+    for col in data_sub.columns.values:
         if ("event_index" not in col) and ("hits_index" not in col):
             assert_allclose(data_all[col], data_sub[col], err_msg=col)
 
@@ -465,7 +465,7 @@ def events_and_ref_data(flat_hits, event_params):
     ref_file = file + "_" + geom + "_eventdata_"+str(file_index)+".npz"
     # Generate the reference data if needed
     if GENERATE_REFERENCE:
-        n_branches = len(sample.data.dtype.names)
+        n_branches = len(sample.data.columns.values)
         generate_reference(ref_file,
                            sample.get_events(events),
                            n_branches,
@@ -480,7 +480,7 @@ def test_get_event(events_and_ref_data):
     # Unpack the data
     sample, ref_data, events = events_and_ref_data
     event_data = sample.get_events(events)
-    for branch in event_data.dtype.names:
+    for branch in sample.data.columns.values:
         assert_allclose(ref_data[branch], event_data[branch])
 
 def test_get_signal_hits(events_and_ref_data):
@@ -491,7 +491,7 @@ def test_get_signal_hits(events_and_ref_data):
     sample, ref_data, events = events_and_ref_data
     event_data = sample.get_signal_hits(events)
     test_ref = ref_data[ref_data[sample.hit_type_name] == sample.signal_coding]
-    for branch in event_data.dtype.names:
+    for branch in sample.data.columns.values:
         assert_allclose(test_ref[branch], event_data[branch])
 
 def test_get_background_hits(events_and_ref_data):
@@ -502,7 +502,7 @@ def test_get_background_hits(events_and_ref_data):
     sample, ref_data, events = events_and_ref_data
     event_data = sample.get_background_hits(events)
     test_ref = ref_data[ref_data[sample.hit_type_name] != sample.signal_coding]
-    for branch in event_data.dtype.names:
+    for branch in sample.data.columns.values:
         assert_allclose(test_ref[branch], event_data[branch])
 
 @pytest.mark.parametrize("sort_branch, ascending", [
@@ -523,8 +523,10 @@ def test_sort_hits(events_and_ref_data, sort_branch, ascending):
     sample.sort_hits(sort_branch, ascending=ascending)
     event_data = sample.get_events(events)
     # Check that it worked
-    for branch in event_data.dtype.names:
-        if ("hits_index" not in branch) and ("IsSig" not in branch):
+    passing = True
+    for branch in sample.data.columns.values:
+        # TODO remove this
+        if ("hits_index" not in branch):
             error_msg = "Branch {} not sorted".format(branch)
             assert_allclose(test_ref[branch],
                             event_data[branch],
@@ -537,7 +539,7 @@ def test_sort_hits(events_and_ref_data, sort_branch, ascending):
     (BRANCHES[0],   None,         0,       None, False),
     (BRANCHES[0],   None,         None,    0,    False),
     (BRANCHES[0],   None,         None,    0,    True),
-    ("event_index", np.arange(5), None,    None, False)
+    ("EventNumber", np.arange(5), None,    None, False)
     ])
 def filter_params(request):
     return request.param
@@ -551,9 +553,6 @@ def test_filtered_hits(flat_hits, filter_params):
     variable, values, greater, less, invert = filter_params
     variable = NAMES[geom][1] + variable
     # Get the relevant hits to keep
-    if values is not None:
-        print(sample.data[variable])
-        print(values)
     filtered_hits = sample.filter_hits(variable, these_hits=None,
                                        values=values,
                                        greater_than=greater,
