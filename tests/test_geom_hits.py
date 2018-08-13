@@ -221,7 +221,7 @@ def cth_hits(cstrct_cth_hits_params):
                           prefix=prefix,
                           branches=branches)
     # Randomly assign every 5th hit as a signal hit
-    sample.data[sample.hit_type_name][::5] = True
+    sample.data.loc[::5, sample.hit_type_name] = bool(True)
     return sample, file, geom, rqst_branches
 
 @pytest.fixture()
@@ -254,7 +254,6 @@ def test_all_cth_branches_present(cth_hits_and_ref):
         ref_branches = reference_data.dtype.names
         smp_branches = sample.data.columns.values
         miss = [b for b in ref_branches if b not in smp_branches]
-        miss = [b for b in miss if "_index" not in b]
         assert not miss,\
             "Requested all branches, but did not find {}".format("\n".join(miss))
 

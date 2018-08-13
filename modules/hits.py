@@ -12,11 +12,14 @@ import pandas as pd
 from cylinder import CDC, CTH
 
 # TODO swith to pandas
-# TODO deal with multi-indexing events from evt_number
-    # TODO improve adding two samples together
-    # TODO deal with empty CTH events or empty CDC events
-# TODO improve CTH tigger logic to have time window
-# TODO improve CTH hits to sum over 10ns bins
+    # TODO move data_tools into hits
+    # TODO deal with multi-indexing events from evt_number
+        # TODO improve adding two samples together
+        # TODO deal with empty CTH events or empty CDC events
+        # TODO maintain contiguity of event fetching
+    # TODO improve CTH tigger logic to have time window
+    # TODO improve CTH hits to sum over 10ns bins
+# TODO run the analysis once
 # TODO change all documentation
 
 def _is_sequence(arg):
@@ -79,11 +82,11 @@ def _add_name_to_branches(path, tree, name, branches, empty_branches):
                                   branches=[name],
                                   soft_check=True)
     # Check which list to return it to
+    branches = _return_branches_as_list(branches)
+    empty_branches = _return_branches_as_list(empty_branches)
     if has_name:
-        branches = _return_branches_as_list(branches)
         branches += [name]
     else:
-        empty_branches = _return_branches_as_list(empty_branches)
         empty_branches += [name]
     return branches, empty_branches
 
@@ -245,11 +248,10 @@ class FlatHits(object):
         _, hits_to_events, event_to_n_hits =\
             np.unique (evt_index, return_inverse=True, return_counts=True)
         # Set the event index
-        # TODO maybe could use return_inverse here instead of unique-repeat
-        self.data[self.event_index_name] =\
-            np.repeat(np.arange(event_to_n_hits.shape[0]), event_to_n_hits)
+        self.data.loc[:, self.event_index_name] = hits_to_events
         # Set the hit index
-        self.data[self.hits_index_name] = hits_to_events
+        self.data.loc[:, self.hits_index_name] = \
+            np.concatenate([np.arange(evts) for evts in event_to_n_hits])
         # Set the indexes on the data frame
         self.data.set_index([self.event_index_name, self.hits_index_name],
                              inplace=True, drop=True)
@@ -477,6 +479,7 @@ class GeomHits(FlatHits):
                                                          branches,
                                                          empty_branches)
         # Define the names of the time and energy depostition columns
+        branches = _return_branches_as_list(branches) 
         self.edep_name = prefix + edep_name
         self.time_name = prefix + time_name
         branches += [self.edep_name, self.time_name]
@@ -694,8 +697,8 @@ class CDCHits(GeomHits):
         # Get the first element for the rest of the data
         self.data = chan_groups.head(1)
         # Reset the special data
-        self.data[[self.edep_name, self.hit_type_name]] = \
-            _cached_vals[[self.edep_name, self.hit_type_name]].values
+        self.data.loc[:, (self.edep_name, self.hit_type_name)] =\
+            _cached_vals.loc[:, (self.edep_name, self.hit_type_name)].values
         # Sort the hits by time again
         # TODO remove once over
         self.sort_hits(self.time_name)

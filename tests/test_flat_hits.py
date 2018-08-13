@@ -540,6 +540,22 @@ def test_reindex_event(events_and_ref_data, remove_event):
         assert_allclose(event_data_before[branch],
                         event_data_after[branch],
                         err_msg=branch)
+    # Ensure the hit indexes range from [0, n_hits) for each event
+    for _data in [event_data_after, event_data_after]:
+        # Get the indexes for each event
+        evt_index = _data.index.get_level_values(sample.event_index_name)
+        hit_index = _data.index.get_level_values(sample.hits_index_name)
+        # Count the occurances and check where the occurance of each
+        # event occurs
+        _, first_hit, hits_per_event = np.unique(evt_index,
+                                                 return_index=True,
+                                                 return_counts=True)
+        # Transform this to the last occurance
+        last_hit = np.roll(first_hit, -1) - 1
+        # Ensure that the index of this last hit == number of hits in
+        # event - 1
+        err = "Hit indexing seems upset"
+        assert_allclose(hit_index[last_hit]+1, hits_per_event, err_msg=err)
 
 def test_get_signal_hits(events_and_ref_data):
     """
