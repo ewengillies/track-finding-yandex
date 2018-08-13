@@ -239,24 +239,24 @@ class FlatHits(object):
         # If its not the first time, use the existing event index
         else:
             # Sort the hits by existing event index
-            evt_index = self.data.index.droplevel(level=self.hits_index_name).values
+            evt_index = \
+                self.data.index.get_level_values(self.event_index_name).values
         # Check the hits are sorted by event as far as the key value is
         # concernted
         assert np.array_equal(evt_index, np.sort(evt_index)),\
             "Event index named {} not sorted".format(self.evt_number)
         # If so, get the unique values
-        _, hits_to_events, event_to_n_hits =\
-            np.unique (evt_index, return_inverse=True, return_counts=True)
+        _, event_to_n_hits = np.unique(evt_index, return_counts=True)
         # Set the event index
-        self.data.loc[:, self.event_index_name] = hits_to_events
+        self.data.loc[:, self.event_index_name] = evt_index
         # Set the hit index
         self.data.loc[:, self.hits_index_name] = \
             np.concatenate([np.arange(evts) for evts in event_to_n_hits])
         # Set the indexes on the data frame
         self.data.set_index([self.event_index_name, self.hits_index_name],
-                             inplace=True, drop=True)
+                             inplace=True, drop=[False, True])
         # Set the number of hits and events as well
-        self.n_hits = hits_to_events.shape[0]
+        self.n_hits = sum(event_to_n_hits)
         self.n_events = event_to_n_hits.shape[0]
 
     def _finalize_data(self, path, tree):
@@ -325,7 +325,9 @@ class FlatHits(object):
         if events is None:
             return self.data
         # Return all events by default
-        return self.data.loc[events]
+        loc_lvl = self.data.index.names.index(self.event_index_name)
+        loc_val = self.data.index.levels[loc_lvl][events]
+        return self.data.loc[loc_val]
 
     def trim_events(self, events):
         """
