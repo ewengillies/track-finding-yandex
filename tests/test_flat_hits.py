@@ -699,7 +699,8 @@ def test_trim_hits(flat_hits, filter_params):
 
 # TEST ADDING HITS##############################################################
 
-def test_add_hits_by_event(flat_hits):
+@pytest.mark.parametrize("keep_n_events", [None, 10, 2])
+def test_add_hits_by_event(flat_hits, keep_n_events):
     """
     Test if events added horizontally (i.e. data is added to each event)
     works well
@@ -710,18 +711,26 @@ def test_add_hits_by_event(flat_hits):
     sample_copy = deepcopy(sample)
     # Reindex the sample copy data with the revesed index labels
     evt_index = sample.data.index.get_level_values(sample.event_index)
-    unique_ids = np.unique(evt_index)[::-1]
-    # Set the new indexes
-    sample_copy.set_event_indexes(unique_ids)
-    # Add the hits together
+    unique_ids = np.unique(evt_index)
+    # Trim some events if we need to
+    if keep_n_events is not None:
+        sample_copy.trim_hits(sample.evt_number, less_than=keep_n_events+1)
+        unique_ids = unique_ids[:10]
+    # Set the new indexes and hence reverse the data
+    sample_copy.set_event_indexes(unique_ids[::-1])
+    # Add the hits together, adding in the reversed data
     sample.add_hits(sample_copy)
-    # Rigourously sort the hits in each event
+    # Rigourously sort the hits in each event to compare them
     sample.sort_hits(sample.data.columns.values, reset_index=False)
     # Check that the data is now symmetreic
     evt_range = np.arange(sample.n_events)
+    if keep_n_events is not None:
+        evt_range = np.arange(keep_n_events)
     for beg, end in zip(evt_range, evt_range[::-1]):
         beg_data = sample.get_events(beg)
         end_data = sample.get_events(end)
+        print(np.unique(beg_data[sample.evt_number]))
+        print(np.unique(end_data[sample.evt_number]))
         for col in sample.data.columns.values:
             assert_allclose(beg_data[col].values,
                             end_data[col].values,
