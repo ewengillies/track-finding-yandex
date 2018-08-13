@@ -2,13 +2,14 @@
 Tests for importing data from root file
 """
 from __future__ import print_function
-#import sys
 import pytest
 import numpy as np
 from numpy.testing import assert_allclose
 from root_numpy import list_branches
 import hits
 from hits import check_for_branches, _add_name_to_branches, _is_sequence
+from copy import deepcopy
+from pprint import pprint
 
 # Pylint settings
 # pylint: disable=redefined-outer-name
@@ -117,6 +118,31 @@ def check_filter(filtered_hits, variable, values, greater, less, invert):
         assert test, \
             err + "did not filter by 'greater than' {} correctly".format(less)+\
             " {}".format(filtered_hits[variable])
+
+def check_fetched_events(event_data_before, event_data_after, sample):
+    """
+    Check that everything looks okay after things were reindexed
+    """
+    for branch in sample.data.columns.values:
+        assert_allclose(event_data_before[branch],
+                        event_data_after[branch],
+                        err_msg=branch)
+    # Ensure the hit indexes range from [0, n_hits) for each event
+    for _data in [event_data_after, event_data_after]:
+        # Get the indexes for each event
+        evt_index = _data.index.get_level_values(sample.event_index)
+        hit_index = _data.index.get_level_values(sample.hit_index)
+        # Count the occurances and check where the occurance of each
+        # event occurs
+        _, first_hit, hits_per_event = np.unique(evt_index,
+                                                 return_index=True,
+                                                 return_counts=True)
+        # Transform this to the last occurance
+        last_hit = np.roll(first_hit, -1) - 1
+        # Ensure that the index of this last hit == number of hits in
+        # event - 1
+        err = "Hit indexing seems upset"
+        assert_allclose(hit_index[last_hit]+1, hits_per_event, err_msg=err)
 
 # TEST HELPER FUNCTIONS ########################################################
 
@@ -505,7 +531,7 @@ def test_get_event(events_and_ref_data):
         assert_allclose(ref_data[branch], event_data[branch])
 
 @pytest.mark.parametrize("remove_event", [0, 1, 5, 10])
-def test_reindex_event(events_and_ref_data, remove_event):
+def test_reindex_remove_event(events_and_ref_data, remove_event):
     """
     Test if removing an event and reindexing the event list does not
     affect what data is stored
@@ -536,26 +562,40 @@ def test_reindex_event(events_and_ref_data, remove_event):
     # reqested event, this event index must be decrimented. Otherwise, leave it
     events = [evt - 1 if evt > remove_event else evt for evt in events]
     event_data_after = sample.get_events(events)
-    for branch in sample.data.columns.values:
-        assert_allclose(event_data_before[branch],
-                        event_data_after[branch],
-                        err_msg=branch)
-    # Ensure the hit indexes range from [0, n_hits) for each event
-    for _data in [event_data_after, event_data_after]:
-        # Get the indexes for each event
-        evt_index = _data.index.get_level_values(sample.event_index_name)
-        hit_index = _data.index.get_level_values(sample.hits_index_name)
-        # Count the occurances and check where the occurance of each
-        # event occurs
-        _, first_hit, hits_per_event = np.unique(evt_index,
-                                                 return_index=True,
-                                                 return_counts=True)
-        # Transform this to the last occurance
-        last_hit = np.roll(first_hit, -1) - 1
-        # Ensure that the index of this last hit == number of hits in
-        # event - 1
-        err = "Hit indexing seems upset"
-        assert_allclose(hit_index[last_hit]+1, hits_per_event, err_msg=err)
+    check_fetched_events(event_data_before, event_data_after, sample)
+
+@pytest.mark.parametrize("reindex_list",[
+    (np.arange(25), True),
+    (np.random.permutation(25), False),
+    (np.arange(1000, 1025), True),
+    (np.arange(1000, 2000), True),
+    (np.arange(4), False)])
+def test_reindex_event(flat_hits, reindex_list):
+    """
+    Test that remapping indexes goes as planned
+    """
+    # Unpack the data
+    sample, _, _, _ = flat_hits
+    new_indexes, will_pass = reindex_list
+    test_events = [10, 11, 15, 0]
+    # Record the shape of the event before
+    event_data_before = deepcopy(sample.get_events(test_events))
+    # If it should pass, try it
+    if will_pass:
+        # Reindex the data
+        sample.set_event_indexes(new_indexes)
+        # Ensure the data is actually different now
+        event_data_after = sample.get_events(test_events)
+        check_fetched_events(event_data_before, event_data_after, sample)
+    # If it should fail, make sure it does
+    else:
+        with pytest.raises(AssertionError,
+                           message="Scrambled events should fail"):
+            # Reindex the data
+            sample.set_event_indexes(new_indexes)
+            # Ensure the data is actually different now
+            event_data_after = sample.get_events(test_events)
+            check_fetched_events(event_data_before, event_data_after, sample)
 
 def test_get_signal_hits(events_and_ref_data):
     """
@@ -655,3 +695,34 @@ def test_trim_hits(flat_hits, filter_params):
                      less_than=less,
                      invert=invert)
     check_filter(sample.data, variable, values, greater, less, invert)
+
+
+# TEST ADDING HITS##############################################################
+
+def test_add_hits_by_event(flat_hits):
+    """
+    Test if events added horizontally (i.e. data is added to each event)
+    works well
+    """
+    # Unpack the parameters
+    sample, _, _, _ = flat_hits
+    # Copy the sample
+    sample_copy = deepcopy(sample)
+    # Reindex the sample copy data with the revesed index labels
+    evt_index = sample.data.index.get_level_values(sample.event_index)
+    unique_ids = np.unique(evt_index)[::-1]
+    # Set the new indexes
+    sample_copy.set_event_indexes(unique_ids)
+    # Add the hits together
+    sample.add_hits(sample_copy)
+    # Rigourously sort the hits in each event
+    sample.sort_hits(sample.data.columns.values, reset_index=False)
+    # Check that the data is now symmetreic
+    evt_range = np.arange(sample.n_events)
+    for beg, end in zip(evt_range, evt_range[::-1]):
+        beg_data = sample.get_events(beg)
+        end_data = sample.get_events(end)
+        for col in sample.data.columns.values:
+            assert_allclose(beg_data[col].values,
+                            end_data[col].values,
+                            err_msg=col)

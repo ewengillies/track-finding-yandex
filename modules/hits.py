@@ -10,13 +10,15 @@ import numpy as np
 from root_numpy import root2array, list_branches
 import pandas as pd
 from cylinder import CDC, CTH
+from pprint import pprint #TODO remove
 
 # TODO swith to pandas
     # TODO move data_tools into hits
     # TODO deal with multi-indexing events from evt_number
         # TODO improve adding two samples together
-        # TODO deal with empty CTH events or empty CDC events
         # TODO maintain contiguity of event fetching
+        # TODO deal with empty CTH events or empty CDC events: do i really need 
+        #      this?
     # TODO improve CTH tigger logic to have time window
     # TODO improve CTH hits to sum over 10ns bins
 # TODO run the analysis once
@@ -90,6 +92,38 @@ def _add_name_to_branches(path, tree, name, branches, empty_branches):
         empty_branches += [name]
     return branches, empty_branches
 
+def map_indexes(old_indexes, new_indexes, force_shape=True):
+    # TODO documentation, more
+    """
+    Map the values in the old_indexes to the unique values in the new_indexes.  
+    This mapping preserves the order in which indexes occur in each set.
+    """
+    # Get the information needed for the mapping, which is the correspondence 
+    # mapping between the two sets of indexes, as generated from numpy.unique
+    v_old, idx_old, inv_old = np.unique(old_indexes, 
+                                        return_index=True,
+                                        return_inverse=True)
+    v_new, idx_new = np.unique(new_indexes,
+                               return_index=True)
+    # Preserve the order of the indexes as they first appeared
+    new_idx_vals = v_new[idx_new.argsort()]
+    old_idx_vals = v_old[idx_old.argsort()]
+    # Ensure there are enough new indexes to map the old ones
+    assert v_new.shape[0] >= v_old.shape[0],\
+        "Not enough new indexes to map to the old ones"+\
+        "Number of unique new indexes {}".format(v_new.shape[0])+\
+        "Number of unique old indexes {}".format(v_old.shape[0])
+    # The new index values can be longer than the old, but not vice-versa!
+    if force_shape:
+        new_idx_vals = new_idx_vals[:v_old.shape[0]]
+    # Get the mappings from old keys to new indexes with the order that each 
+    # occured first preserved
+    map_v = dict(zip(old_idx_vals, new_idx_vals))
+    pprint(map_v)
+    # Map the old values to the new values, then use the inverse mapping give 
+    # from numpy unique for the old indexes
+    return np.array([map_v[x] for x in v_old])[inv_old]
+
 class FlatHits(object):
     # pylint: disable=too-many-instance-attributes
     # pylint: disable=bad-continuation
@@ -119,8 +153,8 @@ class FlatHits(object):
         self.hit_type_name = self.prefix + hit_type_name
         # Each hit by hit ID and by event index, where event index is contiguous
         # and starts from zero
-        self.hits_index_name = "hits_index"
-        self.event_index_name = "event_index"
+        self.hit_index = "hits_index"
+        self.event_index = "event_index"
 
         # The selection controls which hits are imported
         self.selection = selection
@@ -136,8 +170,8 @@ class FlatHits(object):
         # Add the branches as we expect
         self._branches += [self.hit_type_name, self.evt_number]
         # Add the indexes as integers
-        self._e_branch_dict[self.hits_index_name] = np.uint32
-        self._e_branch_dict[self.event_index_name] = np.uint32
+        self._e_branch_dict[self.hit_index] = np.uint32
+        self._e_branch_dict[self.event_index] = np.uint32
 
         # Get the number of hits for each event, limiting this lookup table if
         # we only want a subset of events
@@ -151,7 +185,8 @@ class FlatHits(object):
                 self.selection = _hit_sel_str
         # Finialize the data into the data structures
         self.data = self._finalize_data(path, tree)
-        self._reset_indexes(construction=True)
+        self._reset_indexes(evt_index=self.data[self.evt_number].values,
+                            construction=True)
 
     def _import_root_file(self, path, tree, branches, single_perc=True):
         """
@@ -227,37 +262,62 @@ class FlatHits(object):
         # information
         return evt_n_hits.shape[0], np.sum(evt_n_hits), " && ".join(_hit_sel)
 
-    def _reset_indexes(self, construction=False):
-        '''
-        '''
-        # Initialize the variable
-        evt_index = None
-        # If this is the first time the indexes are set, use the evt_number to
-        # generate the number of hits per event
-        if construction:
-            evt_index = self.data[self.evt_number].values
-        # If its not the first time, use the existing event index
-        else:
-            # Sort the hits by existing event index
+    def _check_consistent_index(self, idx_new):
+        # TODO documentation
+        """
+        Checks there is a one-to-one mapping between old and new indexes
+        """
+        # Get the old index
+        old_evt_idx = self.data.index.get_level_values(self.event_index).values
+        # Map the old values onto the new values, this should really just 
+        # recover old_evt_idx if they are consistent!
+        new_to_old = map_indexes(idx_new, old_evt_idx, force_shape=False)
+        # Check that the old mapping can be recovered from the new one
+        np.testing.assert_array_equal(old_evt_idx, new_to_old)
+
+    def set_event_indexes(self, new_indexes):
+        # TODO docuumentation
+        """
+        """
+        # Get the old index
+        old_evt_idx = self.data.index.get_level_values(self.event_index).values
+        # Map the old values onto the new values, this should really just 
+        # recover old_evt_idx if they are consistent!
+        _new_indexes = map_indexes(old_evt_idx, new_indexes)
+        self._reset_indexes(evt_index=_new_indexes)
+
+    def _reset_indexes(self, evt_index=None, construction=False, sort_index=True):
+        # TODO docuumentation
+        """
+        """
+        if sort_index:
+            # Sort by the new index
+            self.data.sort_index(level=[self.event_index,
+                                        self.hit_index], inplace=True)
+        # If no values are passed, use the existing event index
+        if evt_index is None:
             evt_index = \
-                self.data.index.get_level_values(self.event_index_name).values
-        # Check the hits are sorted by event as far as the key value is
-        # concernted
-        assert np.array_equal(evt_index, np.sort(evt_index)),\
-            "Event index named {} not sorted".format(self.evt_number)
+                self.data.index.get_level_values(self.event_index).values
+        # Check the old index is consistent with the new one
+        elif not construction:
+            self._check_consistent_index(evt_index)
         # If so, get the unique values
         _, event_to_n_hits = np.unique(evt_index, return_counts=True)
         # Set the event index
-        self.data.loc[:, self.event_index_name] = evt_index
+        self.data.loc[:, self.event_index] = evt_index
         # Set the hit index
-        self.data.loc[:, self.hits_index_name] = \
+        self.data.loc[:, self.hit_index] = \
             np.concatenate([np.arange(evts) for evts in event_to_n_hits])
         # Set the indexes on the data frame
-        self.data.set_index([self.event_index_name, self.hits_index_name],
-                             inplace=True, drop=[False, True])
+        self.data.set_index([self.event_index, self.hit_index],
+                             inplace=True, drop=True)
         # Set the number of hits and events as well
         self.n_hits = sum(event_to_n_hits)
         self.n_events = event_to_n_hits.shape[0]
+        # Sort by the new index
+        if sort_index:
+            self.data.sort_index(level=[self.event_index,
+                                        self.hit_index], inplace=True)
 
     def _finalize_data(self, path, tree):
         """
@@ -325,7 +385,7 @@ class FlatHits(object):
         if events is None:
             return self.data
         # Return all events by default
-        loc_lvl = self.data.index.names.index(self.event_index_name)
+        loc_lvl = self.data.index.names.index(self.event_index)
         loc_val = self.data.index.levels[loc_lvl][events]
         return self.data.loc[loc_val]
 
@@ -341,19 +401,19 @@ class FlatHits(object):
         this is done in acending order and the hit index is reset after sorting.
         """
         # Always sort by event index
-        var_list = [self.event_index_name]
+        var_list = [self.event_index]
         # If variable(s), sort by this variable as well
         if variable is not None:
             # Unpack it if its a sequence
             if _is_sequence(variable):
-                var_list = [self.event_index_name, *variable]
+                var_list = [self.event_index, *variable]
             else:
-                var_list = [self.event_index_name, variable]
+                var_list = [self.event_index, variable]
         # Sort each event internally
         self.data.sort_values(var_list, ascending=ascending, inplace=True)
         # Reset the hit index
         if reset_index:
-            self._reset_indexes()
+            self._reset_indexes(sort_index=False)
 
     def filter_hits(self, variable, these_hits=None,
                     values=None, greater_than=None,
@@ -386,16 +446,40 @@ class FlatHits(object):
                                      invert=invert)
         self._reset_indexes()
 
-    def add_hits(self, hits, event_indexes=None):
+    def add_events(self, flat_hits_to_add):
         """
-        Append the hits to the current data. If event indexes are supplied, then
-        the hits are added event-wise to the event indexes provided.  Otherwise,
-        they are stacked on top of each event, starting with event 0
+        Append events to the end of an existing sample
         """
-        # TODO fix the fact that flathits will break cause no time_name
-        self.data = np.hstack([self.data, hits])
-        self.data.sort(order=[self.event_index_name, self.time_name])
-        self._reset_event_to_n_hits()
+        # TODO documentation
+        self.data = self.data.append(self.data, flat_hits_to_add.data)
+        self._reset_indexes()
+
+    def add_hits(self, hits_to_add):
+        """
+        Add hits of two samples to join events
+        """
+        # TODO documentation
+        # Determine which sample has more events and therefore which indexes to 
+        # remap, defaulting to the assumption that self.data has more events
+        origin, to_add = self, hits_to_add
+        if hits_to_add.n_events > self.n_events:
+            origin, to_add = self, hits_to_add
+        # Remap the indexes of the smaller set to match the indexes of the 
+        # larger set
+        old_evt_idx = to_add.data.index.get_level_values(self.event_index)
+        new_evt_idx = origin.data.index.get_level_values(self.event_index)
+        # Set the indexes of the data to add to these new indexes
+        to_add.set_event_indexes(np.unique(new_evt_idx))
+        # Append the data as is to the old data
+        print("added shapes")
+        print(to_add.data.shape)
+        print(origin.data.shape)
+        print(self.data.shape)
+        self.data = origin.data.append(to_add.data)
+        print(to_add.data.shape)
+        print(origin.data.shape)
+        print(self.data.shape)
+        self._reset_indexes()
 
     # TODO depreciate
     def remove_branch(self, branch_names):
@@ -593,10 +677,10 @@ class GeomHits(FlatHits):
         result = np.zeros(self.n_hits, dtype=int)
         # Get the background hits
         # TODO change for dataframe
-        bkg_hits = self.get_background_hits(events)[self.hits_index_name]
+        bkg_hits = self.get_background_hits(events)[self.hit_index]
         result[bkg_hits] = 2
         # Get the signal hits
-        sig_hits = self.get_signal_hits(events)[self.hits_index_name]
+        sig_hits = self.get_signal_hits(events)[self.hit_index]
         result[sig_hits] = 1
         return result.astype(int)
 
@@ -688,16 +772,23 @@ class CDCHits(GeomHits):
         # Sort the hits by channel and by time
         self.sort_hits([self.flat_name, self.time_name])
         # Group by the channels
-        chan_groups = self.data.groupby([self.event_index_name,
+        chan_groups = self.data.groupby([self.event_index,
                                          self.flat_name])
         # Ensure we sum the energy deposition and keep the signal labels
         agg_dict = {}
         agg_dict[self.edep_name] = 'sum'
         agg_dict[self.hit_type_name] = 'any'
+        agg_dict[self.flat_name] = 'mean'
         # Evaluate the groups for these two special cases
         _cached_vals = chan_groups.agg(agg_dict)
         # Get the first element for the rest of the data
         self.data = chan_groups.head(1)
+        # Ensure the channel number match along all events before setting the 
+        # special information, as an extra precaution
+        err = "Improperly trying to set edep and sig label"
+        np.testing.assert_allclose(_cached_vals.loc[:, (self.flat_name)],
+                                   self.data.loc[:, (self.flat_name)],
+                                   err_msg=err)
         # Reset the special data
         self.data.loc[:, (self.edep_name, self.hit_type_name)] =\
             _cached_vals.loc[:, (self.edep_name, self.hit_type_name)].values
@@ -732,7 +823,7 @@ class CDCHits(GeomHits):
         # Get the events as an array
         _evts = np.sort(np.array(_evts))
         # Select the relevant event from data
-        meas = self.get_events(_evts).groupby([self.event_index_name,
+        meas = self.get_events(_evts).groupby([self.event_index,
                                                self.flat_name]).head(1)
         # Return this if we don't want the geometry to come too
         if only_hits:
@@ -740,7 +831,7 @@ class CDCHits(GeomHits):
         # Get the wire_ids and event_ids of the hit data
         wire_ids = meas[self.flat_name].values
         # Map the evnt_ids to the minimal continous set
-        evnt_ids = meas.index.droplevel(level=self.hits_index_name).values
+        evnt_ids = meas.index.droplevel(level=self.hit_index).values
         _, evnt_ids = np.unique(evnt_ids, return_inverse=True)
         # Get the default values
         result = default*np.ones((_evts.size, self.geom.n_points), dtype=dtype)
@@ -988,7 +1079,7 @@ class CTHHits(GeomHits):
             # TODO change for dataframe
             trig_hits = self.filter_hits(self.flat_name,
                                          these_hits=self.get_events(event),
-                                         values=trig_vols)[self.hits_index_name]
+                                         values=trig_vols)[self.hit_index]
             # Get the indexes where these volumes first appear in the
             # (event,time) sorted data
             _, uniq_idxs = np.unique(self.data[self.flat_name][trig_hits],
@@ -1016,7 +1107,7 @@ class CTHHits(GeomHits):
         return self.filter_hits(self.trig_name,
                                 these_hits=self.get_events(events),
                                 values=0,
-                                invert=True)[self.hits_index_name]
+                                invert=True)[self.hit_index]
 
     def get_trig_evts(self, events=None):
         """

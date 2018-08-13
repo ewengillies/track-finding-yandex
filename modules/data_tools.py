@@ -172,7 +172,7 @@ def data_import_sample(this_signal, this_background,
                                  use_cuts=these_cuts, branches=branches,
                                  empty_branches=empty_branches)
     # TODO hack fix the background cth and cdc to allow for empty cth events
-    back_hits.cth.data[back_hits.cth.event_index_name] = \
+    back_hits.cth.data[back_hits.cth.event_index] = \
             back_hits.cth.data[back_hits.cth.evt_number] - \
             np.amin(back_hits.cdc.data[back_hits.cdc.evt_number])
     back_hits.n_events = max(back_hits.cdc.n_events, back_hits.cth.n_events)
