@@ -714,7 +714,7 @@ def test_add_hits_by_event(flat_hits, keep_n_events):
     # Trim some events if we need to
     if keep_n_events is not None:
         sample_copy.trim_hits(sample.evt_number, less_than=keep_n_events+1)
-        unique_ids = unique_ids[:10]
+        unique_ids = unique_ids[:keep_n_events]
     # Set the new indexes and hence reverse the data
     sample_copy.set_event_indexes(unique_ids[::-1])
     # Add the hits together, adding in the reversed data
@@ -734,3 +734,39 @@ def test_add_hits_by_event(flat_hits, keep_n_events):
             assert_allclose(beg_data[col].values,
                             end_data[col].values,
                             err_msg=col)
+
+@pytest.mark.parametrize("keep_n_events", [None, 10, 2])
+def test_add_events(flat_hits, keep_n_events):
+    """
+    Test if events added horizontally (i.e. data is added to each event)
+    works well
+    """
+    # Unpack the parameters
+    sample, _, _, _ = flat_hits
+    # Copy the sample
+    sample_copy = deepcopy(sample)
+    n_orig_events = sample_copy.n_events
+    # Trim some events if we need to
+    if keep_n_events is not None:
+        sample_copy.trim_hits(sample.evt_number, less_than=keep_n_events+1)
+    # Add the hits together, adding in the reversed data
+    sample.add_events(sample_copy)
+    # Rigourously sort the hits in each event to compare them
+    sample.sort_hits(sample.data.columns.values, reset_index=False)
+    # Check that the data is now symmetreic
+    evt_range = np.arange(n_orig_events)
+    evts_added = keep_n_events
+    if keep_n_events is None:
+        evts_added = n_orig_events
+    else:
+        evt_range = np.arange(keep_n_events)
+    assert sample.n_events == (n_orig_events + evts_added),\
+        "Expected number of new events "+\
+        "{} but found {}".format(n_orig_events + evts_added, sample.n_events)
+    for beg, end in zip(evt_range, evt_range + n_orig_events):
+        beg_data = sample.get_events(beg)
+        end_data = sample.get_events(end)
+        for col in sample.data.columns.values:
+            assert_allclose(beg_data[col].values,
+                            end_data[col].values,
+                            err_msg="{} {} {}".format(col, beg, end))

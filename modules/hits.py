@@ -16,9 +16,8 @@ from pprint import pprint #TODO remove
     # TODO move data_tools into hits
     # TODO deal with multi-indexing events from evt_number
         # TODO improve adding two samples together
-        # TODO maintain contiguity of event fetching
         # TODO deal with empty CTH events or empty CDC events: do i really need 
-        #      this?
+        #      this? only at the one-event level
     # TODO improve CTH tigger logic to have time window
     # TODO improve CTH hits to sum over 10ns bins
 # TODO run the analysis once
@@ -445,30 +444,40 @@ class FlatHits(object):
                                      invert=invert)
         self._reset_indexes()
 
-    def add_events(self, flat_hits_to_add):
+    def add_events(self, hits_to_add):
+        # TODO documentation
         """
         Append events to the end of an existing sample
         """
-        # TODO documentation
-        self.data = self.data.append(self.data, flat_hits_to_add.data)
+        # Incriment the indexes of the sample to add so that they are higher 
+        # than the existing event indexes
+        loc_lvl = self.data.index.names.index(self.event_index)
+        max_index = np.amax(self.data.index.levels[loc_lvl].values)
+        # Set the indexes of the data to add to these new indexes
+        new_indexes = np.arange(max_index, max_index + hits_to_add.n_events)
+        # Reset the index, adding one so the range is 
+        # (max_index, max_index + n_events]
+        hits_to_add.set_event_indexes(new_indexes + 1)
+        # Append the data as is to the old data
+        self.data = self.data.append(hits_to_add.data)
         self._reset_indexes()
 
-    def add_hits(self, hits_to_add):
+    def add_hits(self, hits_to_add, fix_indexes=True):
+        # TODO documentation
         """
         Add hits of two samples to join events
         """
-        # TODO documentation
         # Determine which sample has more events and therefore which indexes to 
         # remap, defaulting to the assumption that self.data has more events
         origin, to_add = self, hits_to_add
-        if hits_to_add.n_events > self.n_events:
-            origin, to_add = self, hits_to_add
-        # Remap the indexes of the smaller set to match the indexes of the 
-        # larger set
-        old_evt_idx = to_add.data.index.get_level_values(self.event_index)
-        new_evt_idx = origin.data.index.get_level_values(self.event_index)
-        # Set the indexes of the data to add to these new indexes
-        to_add.set_event_indexes(np.unique(new_evt_idx))
+        if fix_indexes:
+            if hits_to_add.n_events > self.n_events:
+                origin, to_add = self, hits_to_add
+            # Remap the indexes of the smaller set to match the indexes of the 
+            # larger set
+            new_evt_idx = origin.data.index.get_level_values(self.event_index)
+            # Set the indexes of the data to add to these new indexes
+            to_add.set_event_indexes(np.unique(new_evt_idx))
         # Append the data as is to the old data
         self.data = origin.data.append(to_add.data)
         self._reset_indexes()
