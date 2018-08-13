@@ -119,7 +119,6 @@ def map_indexes(old_indexes, new_indexes, force_shape=True):
     # Get the mappings from old keys to new indexes with the order that each 
     # occured first preserved
     map_v = dict(zip(old_idx_vals, new_idx_vals))
-    pprint(map_v)
     # Map the old values to the new values, then use the inverse mapping give 
     # from numpy unique for the old indexes
     return np.array([map_v[x] for x in v_old])[inv_old]
@@ -471,14 +470,7 @@ class FlatHits(object):
         # Set the indexes of the data to add to these new indexes
         to_add.set_event_indexes(np.unique(new_evt_idx))
         # Append the data as is to the old data
-        print("added shapes")
-        print(to_add.data.shape)
-        print(origin.data.shape)
-        print(self.data.shape)
         self.data = origin.data.append(to_add.data)
-        print(to_add.data.shape)
-        print(origin.data.shape)
-        print(self.data.shape)
         self._reset_indexes()
 
     # TODO depreciate

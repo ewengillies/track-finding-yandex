@@ -2,14 +2,13 @@
 Tests for importing data from root file
 """
 from __future__ import print_function
+from copy import deepcopy
 import pytest
 import numpy as np
 from numpy.testing import assert_allclose
 from root_numpy import list_branches
 import hits
 from hits import check_for_branches, _add_name_to_branches, _is_sequence
-from copy import deepcopy
-from pprint import pprint
 
 # Pylint settings
 # pylint: disable=redefined-outer-name
