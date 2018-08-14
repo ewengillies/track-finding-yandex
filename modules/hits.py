@@ -10,14 +10,16 @@ import numpy as np
 from root_numpy import root2array, list_branches
 import pandas as pd
 from cylinder import CDC, CTH
-from pprint import pprint #TODO remove
 
 # TODO swith to pandas
     # TODO move data_tools into hits
     # TODO deal with multi-indexing events from evt_number
-        # TODO improve adding two samples together
-        # TODO deal with empty CTH events or empty CDC events: do i really need 
-        #      this? only at the one-event level
+        # TODO deal with empty CTH events or empty CDC events:
+        #      sparse DF with both CTH and CDC hits.
+        #      * do messy version for now, just need:
+        #         * set the CTH logic to work in this
+        #         * adding them to work
+        #         * returning results one event at a time
     # TODO improve CTH tigger logic to have time window
     # TODO improve CTH hits to sum over 10ns bins
 # TODO run the analysis once
