@@ -13,6 +13,8 @@ from cylinder import CDC, CTH
 
 # TODO swith to pandas
     # TODO move data_tools into hits
+    # TODO improve CTH tigger logic to have time window
+    # TODO improve CTH hits to sum over 10ns bins
     # TODO deal with multi-indexing events from evt_number
         # TODO deal with empty CTH events or empty CDC events:
         #      sparse DF with both CTH and CDC hits.
@@ -20,8 +22,6 @@ from cylinder import CDC, CTH
         #         * set the CTH logic to work in this
         #         * adding them to work
         #         * returning results one event at a time
-    # TODO improve CTH tigger logic to have time window
-    # TODO improve CTH hits to sum over 10ns bins
 # TODO run the analysis once
 # TODO change all documentation
 
