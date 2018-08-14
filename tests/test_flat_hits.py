@@ -26,7 +26,8 @@ BRANCHES = ['Track.fStartMomentum.fX',
             'Track.fStartMomentum.fZ',
             'MCPos.fP.fX',
             'MCPos.fP.fY',
-            'MCPos.fP.fZ']
+            'MCPos.fP.fZ',
+            'HitNumber']
 # Turn this on if we want to regenerate the reference sample
 GENERATE_REFERENCE = False
 # Number of branches expected for reference samples
@@ -618,6 +619,8 @@ def test_sort_hits(events_and_ref_data, sort_branch, ascending):
     # Get the branch names
     evt_branch = sample.prefix+"EventNumber"
     sort_branch = [sample.prefix+srt for srt in sort_branch]
+    # Add the hit index as a tie breaker to stabilize the sorting
+    sort_branch += [sample.prefix+"HitNumber"]
     # Sort the data
     test_ref = np.sort(ref_data, order=[evt_branch, *sort_branch])
     sample.sort_hits(sort_branch, ascending=ascending)
