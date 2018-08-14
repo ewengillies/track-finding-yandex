@@ -8,6 +8,7 @@ from __future__ import print_function
 from collections import OrderedDict
 import numpy as np
 from root_numpy import root2array, list_branches
+import uproot
 import pandas as pd
 from cylinder import CDC, CTH
 
@@ -24,6 +25,173 @@ from cylinder import CDC, CTH
         #         * returning results one event at a time
 # TODO run the analysis once
 # TODO change all documentation
+
+def _parse_nested_parens(text, left=r'[(]', right=r'[)]', sep=r','):
+    """
+    This parses nested parentheses into nested lists.  Its lifted from
+    StackOverload.
+    Based on https://stackoverflow.com/a/17141899/190597 (falsetru)
+    """
+    pat = r'({}|{}|{})'.format(left, right, sep)
+    tokens = re.split(pat, text)
+    stack = [[]]
+    for x in tokens:
+        if not x or re.match(sep, x): continue
+        if re.match(left, x):
+            stack[-1].append([])
+            stack.append(stack[-1][-1])
+        elif re.match(right, x):
+            stack.pop()
+            if not stack:
+                raise ValueError('error: opening bracket is missing')
+        else:
+            stack[-1].append(x)
+    if len(stack) > 1:
+        print(stack)
+        raise ValueError('error: closing bracket is missing')
+    return stack.pop()
+
+def _parse_operations(parsed_parenths, oper_dict, join_dict):
+    """
+    This parses each comparison operation string in the nested lists
+    into a (function, branch, value) tuple.
+
+    ex: [["branch_a < 10", "&&", "branch_b > 5"], || "branch_c == 5"] ->
+        [[(np.greater, "branch_a, float(10)), "&&",
+          (np.less,    "branch_b, float(5))], "||",
+         (np.equal, "branch_c", 5)]
+    :param: parse_parenths, list
+        Nested list of lists
+    :param: oper_dict, dict
+        Mapping from operation as string to corresponding np.func
+    :param: join_dict, dict
+        Mapping from joining function to corresponding logical np.func
+    """
+    # Check if its a list, if so, recurse until its a string
+    return_val = []
+    for expression in parsed_parenths:
+        if not isinstance(expression, str):
+            return_val += [_parse_operations(expression, oper_dict, join_dict)]
+        else:
+            # Split the input on whitespace
+            compare = expression.split()
+            # Iterate through
+            for index, expr in enumerate(compare):
+                # Check if our current string is an expression
+                if expr in oper_dict.keys():
+                    return_val += [(oper_dict[expr],
+                                    compare[index-1],
+                                    float(compare[index+1]))]
+                # If its a logical comparison, save it for later
+                elif expr in join_dict.keys():
+                    return_val += [expr]
+    # Return the list
+    return return_val
+
+def _parse_connections(parsed_opts, join_dict):
+    """
+    This parses all the connection operations, and replaces the list nesting
+    with tuple nesting.
+
+    ex: [[(np.greater, "branch_a, float(10)), "&&",
+          (np.less,    "branch_b, float(5))], "||",
+         (np.equal, "branch_c", 5)] ->
+        (np.logical_or,
+         (np.logical_and,
+          (np.greater, 'branch_a', 10.0),
+          (np.less, 'branch_b', 5.0)),
+         (np.equal, 'branch_c', 5.0))
+
+    :param: parse_opts, list
+        Nested lists of operations and joining operation strings
+    :param: join_dict, dict
+        Mapping from joining function to corresponding logical np.func
+    """
+    # Check if its a list
+    if not isinstance(parsed_opts, list):
+        return parsed_opts
+    return_val = _parse_connections(parsed_opts[0], join_dict)
+    for index, expr in enumerate(parsed_opts):
+        # Check if our current string is an expression
+        if isinstance(expr, str) and (expr in join_dict.keys()):
+            # If it is, parse the next operation and join it to the current one
+            next_opt = _parse_connections(parsed_opts[index+1], join_dict)
+            # Nest a tuple of tuples
+            return_val = (join_dict[expr], return_val, next_opt)
+    # Return this new stack of operations
+    return return_val
+
+def _parse_selection(selection_string):
+    """
+    This parses a selection string that worked for root_numpy selection 
+    parameter into nested tuples of operation, branch names, and values. It 
+    assumes white space seperation between between branch names, comparison 
+    operations (<,>,==,!=, etc.), joining operations (&&, ||), and values.  
+    Parentheses need no white spaces.
+
+    ex: "(branch_a < 10 && branch_b < 5) || branch_c == 5"->
+        (np.logical_or,
+         (np.logical_and,
+          (np.greater, 'branch_a', 10.0),
+          (np.less, 'branch_b', 5.0)),
+         (np.equal, 'branch_c', 5.0))
+
+    :param: selection string
+        Selection string that could be passed into root_numpy
+    """
+    # Define all valid operations
+    oper_dict = {"==" : np.equal,
+                 "!=" : np.not_equal,
+                 ">=" : np.greater_equal,
+                 "<=" : np.less_equal,
+                 ">"  : np.greater,
+                 "<"  : np.less}
+    # Define all the connection operations we can do
+    join_dict = {"&&" : np.logical_and,
+                 "||" : np.logical_or}
+    # Start by dealing with parentheses
+    parsed_parenths = _parse_nested_parens(selection_string)
+    # Parse the operations into tuples
+    pars_operations = _parse_operations(parsed_parenths, oper_dict, join_dict)
+    # Parse out the connections
+    connected_opers = _parse_connections(pars_operations, join_dict)
+    return connected_operations
+
+def evaluate_selection(selection_string, data):
+    """
+    Evaluate the selection string over the data, similar to root_numpy selection
+    parameter. This selection string must have at least one white space between
+    branch names, comparison operations, and values, eg:
+
+    "(branch_a < 10 && branch_b < 5) || branch_c == 5" is valid
+
+    "(branch_a<10&&branch_b<5)||branch_c==5" is not valid.
+
+    No white space is needed around the parentheses.  Branch names must come 
+    first in the comparison, i.e. (branch_a < 5) not (5 > branch_a).
+
+    Finally, the data must be able to be indexed by branch name,
+    i.e. data[branch_name] needs to return something that will work inside 
+    np.ufuncs. Pandas DataFrame or numpy structured arrays should work.
+
+    This function returns a boolean mask for numpy structured arrays, and 
+    a boolean series for dataframes.
+
+    :param: selection_string, str
+        A string to define what selections will be made
+    :param: data, dataframe or numpy.record
+        Data whose columns can be indexed by a string
+    """
+    opp, val_a, val_b = _parse_selection(selection_string)
+    # If we've found a float, then we've reach a "branch level"
+    if isinstance(val_b, float):
+        # Cast to the correct type using a numpy hack
+        cast_b = np.asscalar(np.array([val_b], dtype=data[val_a].dtype))
+        # Return the value of the operation
+        return opp(data[val_a], val_b)
+    else:
+        # Otherwise, opp is either && or || and we must dig deeper
+        return opp(eval_stack(val_a, data), eval_stack(val_b, data))
 
 def _is_sequence(arg):
     """
@@ -204,18 +372,17 @@ class FlatHits(object):
         check_for_branches(path, tree, branches)
         # Import all the data
         _data = []
-        for branch in branches:
-            # Import the branch
-            _b_data = root2array(path, treename=tree,
-                                 branches=[branch],
-                                 selection=self.selection)[branch]
-            # Convert to single percision if needed
-            if _b_data.dtype == np.float64 and single_perc:
-                _b_data = _b_data.astype(np.float32)
-            # Cache the column to return it
-            _data += [_b_data]
+        # Import the branches
+        _some_data = uproot.open(path)[tree].arrays(branches=branches,
+                                                    outputtype=list)
+        #_some_data.columns = [str(col)[2:-1] for col in _some_data.columns.values]
+        ## Convert to single percision if needed
+        #if _b_data.dtype == np.float64 and single_perc:
+        #    _b_data = _b_data.astype(np.float32)
+        # Cache the column to return it
+        #_data += [_b_data]
         # Return a list of arrays
-        return _data
+        return _some_data
 
     def _count_hits_events(self, path, tree, first_event=0, n_events=None):
         """
