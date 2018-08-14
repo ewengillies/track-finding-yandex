@@ -6,9 +6,8 @@ Notation used below:
 """
 from __future__ import print_function
 import numpy as np
-from root_numpy import root2array, list_branches
 from cylinder import CDC, CTH
-from uproot_selected import import_uproot_selected
+from uproot_selected import import_uproot_selected, check_for_branches
 
 # TODO swith to pandas
     # TODO move data_tools into hits
@@ -47,33 +46,6 @@ def _return_branches_as_list(branches):
     elif not _is_sequence(branches):
         branches = list(branches)
     return list(branches)
-
-def check_for_branches(path, tree, branches, soft_check=False, verbose=False):
-    """
-    This checks for the needed branches before they are imported to avoid
-    the program to hang without any error messages
-
-    :param path: path to root file
-    :param tree: name of tree in root file
-    :param branches: required branches
-    """
-    # Get the names of the availible branches
-    availible_branches = list_branches(path, treename=tree)
-    # Get the requested branches that are not availible
-    bad_branches = list(set(branches) - set(availible_branches))
-    # Otherwise, shut it down if its the wrong length
-    if bad_branches:
-        err_msg = "ERROR: The requested branches:\n"+\
-                  "\n".join(bad_branches) + "\n are not availible\n"+\
-                  "The branches availible are:\n"+"\n".join(availible_branches)
-        if soft_check:
-            if verbose:
-                print(err_msg)
-            return False
-        # Check that this is zero in length
-        assert not bad_branches, err_msg
-        # Otherwise return true
-    return True
 
 def map_indexes(old_indexes, new_indexes, force_shape=True):
     # TODO documentation, more
@@ -276,7 +248,7 @@ class FlatHits():
         # Set the event index
         self.data.loc[:, self.event_index] = evt_index.astype(np.int64)
         # Set the hit index
-        hit_idx = np.concatenate([np.arange(evts) for evts in event_to_n_hits])
+        hit_idx = np.arange(np.sum(event_to_n_hits))
         self.data.loc[:, self.hit_index] = hit_idx.astype(np.int64)
         # Set the indexes on the data frame
         self.data.set_index([self.event_index, self.hit_index],
@@ -456,7 +428,7 @@ class FlatHits():
         # Get the events
         these_hits = self.filter_hits(self.hit_type_name,
                                       these_hits=self.get_events(events),
-                                      values=True)
+                                      values=True, invert=False)
         return these_hits
 
     def get_background_hits(self, events=None):
@@ -466,8 +438,7 @@ class FlatHits():
         """
         these_hits = self.filter_hits(self.hit_type_name,
                                       these_hits=self.get_events(events),
-                                      values=True,
-                                      invert=True)
+                                      values=True, invert=True)
         return these_hits
 
     def print_branches(self):
@@ -517,7 +488,6 @@ class GeomHits(FlatHits):
         self.flat_name = prefix + flat_name
         # Get the geometry of the detector
         self.geom = geom
-
         # Initialize the base class
         FlatHits.__init__(self,
                           path,
@@ -619,7 +589,6 @@ class GeomHits(FlatHits):
         """
         result = np.zeros(self.n_hits, dtype=int)
         # Get the background hits
-        # TODO change for dataframe
         bkg_hits = self.get_background_hits(events)[self.hit_index]
         result[bkg_hits] = 2
         # Get the signal hits

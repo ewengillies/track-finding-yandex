@@ -225,14 +225,24 @@ def format_data(data, branches, selection=None, single_perc=True):
     # Return the data
     return data
 
-def import_uproot_selected(path, tree, branches,
+def import_uproot_selected(path, 
+                           tree=None,
+                           branches=None,
                            selection=None, 
                            num_entries=None,
                            single_perc=True):
     # TODO docs
-    # Import the branches
-    file = uproot.open(path)[tree]
+    # Initialize the return value to none
     data = None
+    # Import the branches
+    file = uproot.open(path)
+    # Check if we've specified a tree, otherwise take the first tree
+    if tree is None:
+        tree = file.keys()[0]
+    file = file[tree]
+    # Check if the branches of the tree are specified, if not, take all branches
+    if branches is None:
+        branches = list_branches(path, tree)
     # Get the branches needed for selection as well
     imprt_brchs = list(branches)
     if selection is not None:
@@ -263,3 +273,44 @@ def import_uproot_selected(path, tree, branches,
         # Concatenate the data
         data = pd.concat(data)
     return data
+
+def check_for_branches(path, tree, branches, soft_check=False, verbose=False):
+    """
+    This checks for the needed branches before they are imported to avoid
+    the program to hang without any error messages
+
+    :param path: path to root file
+    :param tree: name of tree in root file
+    :param branches: required branches
+    """
+    # Get the names of the availible branches
+    availible_branches = list_branches(path, tree)
+    # Get the requested branches that are not availible
+    bad_branches = list(set(branches) - set(availible_branches))
+    # Otherwise, shut it down if its the wrong length
+    if bad_branches:
+        err_msg = "ERROR: The requested branches:\n"+\
+                  "\n".join(bad_branches) + "\n are not availible\n"+\
+                  "The branches availible are:\n"+"\n".join(availible_branches)
+        if soft_check:
+            if verbose:
+                print(err_msg)
+            return False
+        # Check that this is zero in length
+        assert not bad_branches, err_msg
+        # Otherwise return true
+    return True
+
+def list_branches(path, tree=None):
+    """
+    List the branches availible
+    """
+    # TODO 
+    # Get the names of the availible branches
+    availible_branches = uproot.open(path)
+    # Check if we've specified a tree, otherwise take the first tree
+    if tree is None:
+        tree = availible_branches.keys()[0]
+    availible_branches = availible_branches[tree]
+    availible_branches = [str(c)[2:-1] for c in availible_branches.keys()]
+    return availible_branches
