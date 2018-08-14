@@ -6,9 +6,9 @@ from copy import deepcopy
 import pytest
 import numpy as np
 from numpy.testing import assert_allclose
-from root_numpy import list_branches
 import hits
-from hits import check_for_branches, _add_name_to_branches, _is_sequence
+from hits import _is_sequence
+from uproot_selected import check_for_branches, list_branches
 
 # Pylint settings
 # pylint: disable=redefined-outer-name
@@ -133,15 +133,17 @@ def check_fetched_events(event_data_before, event_data_after, sample):
         hit_index = _data.index.get_level_values(sample.hit_index)
         # Count the occurances and check where the occurance of each
         # event occurs
-        _, first_hit, hits_per_event = np.unique(evt_index,
-                                                 return_index=True,
-                                                 return_counts=True)
+        _, first_hit, inverse = np.unique(evt_index,
+                                          return_index=True,
+                                          return_inverse=True)
         # Transform this to the last occurance
         last_hit = np.roll(first_hit, -1) - 1
         # Ensure that the index of this last hit == number of hits in
         # event - 1
         err = "Hit indexing seems upset"
-        assert_allclose(hit_index[last_hit]+1, hits_per_event, err_msg=err)
+        gen_hit_idx = [np.arange(first, last+1) for first, last in
+                       zip(hit_index[first_hit], hit_index[last_hit])]
+        assert_allclose(hit_index, np.concatenate(gen_hit_idx), err_msg=err)
 
 # TEST HELPER FUNCTIONS ########################################################
 
@@ -171,7 +173,7 @@ def good_bad_branches(cstrct_hits_params):
     a_file = file + ".root"
     # Load all the branches
     if branches == "all":
-        branches = list_branches(a_file, treename=tree)
+        branches = list_branches(a_file, tree)
     # Return the list of good and bad branches
     elif branches is None:
         branches = []
@@ -196,29 +198,6 @@ def test_check_branch(good_bad_branches):
     found_bad = check_for_branches(a_file, tree, bad_branches, soft_check=True)
     assert not found_bad, err_msg
 
-def test_add_branch(good_bad_branches):
-    """
-    Check if testing for the branch in the data works
-    """
-    # Unpack the arguments
-    branches, bad_branches, a_file, tree = good_bad_branches
-    # Skip the empty branch case for this test
-    if not branches:
-        return
-    # Check if we can find the branch(es) we expect
-    full_branches = None
-    empty_branches = None
-    for branch in branches + bad_branches:
-        full_branches, empty_branches = _add_name_to_branches(a_file,
-                                                              tree,
-                                                              branch,
-                                                              full_branches,
-                                                              empty_branches)
-    assert full_branches == branches,\
-        "Existing branches not returned correctly\n{}".format("\n".join(branches))
-    assert empty_branches == bad_branches,\
-        "Empty branches not returned correctly\n{}".format("\n".join(bad_branches))
-
 # TEST CONSTRUCTOR AND IMPORT ##################################################
 
 @pytest.fixture()
@@ -233,7 +212,7 @@ def flat_hits(cstrct_hits_params):
     # Load all the branches
     branches = rqst_branches
     if branches == "all":
-        branches = filter_branches(list_branches(root_file, treename=tree))
+        branches = filter_branches(list_branches(root_file, tree))
     # Load the file
     sample = hits.FlatHits(root_file,
                            tree=tree,
@@ -325,8 +304,9 @@ def flat_hits_sel(cstrct_hits_params_sel):
     root_file = file + ".root"
     # Load all the branches
     if branches == "all":
-        branches = filter_branches(list_branches(root_file, treename=tree))
+        branches = filter_branches(list_branches(root_file, tree))
     # Load the file
+    print(branches)
     sample = hits.FlatHits(root_file,
                            tree=tree,
                            prefix=prefix,
@@ -388,7 +368,7 @@ def flat_hits_subset(cstrct_hits_params_subset):
     root_file = file + ".root"
     # Load all the branches
     if branch == "all":
-        branch = filter_branches(list_branches(root_file, treename=tree))
+        branch = filter_branches(list_branches(root_file, tree))
     # Load the file
     sample_all = hits.FlatHits(root_file,
                                tree=tree,
@@ -469,13 +449,17 @@ def flat_hits_empty(cstrct_hits_params_empty):
     root_file = file + ".root"
     # Load all the branches
     if branch == "all":
-        branch = filter_branches(list_branches(root_file, treename=tree))
+        branch = filter_branches(list_branches(root_file, tree))
     # Load the file
     sample = hits.FlatHits(root_file,
                            tree=tree,
                            prefix=prefix,
-                           empty_branches=empty,
                            branches=branch)
+    for e_branch in empty:
+        sample.data.insert(loc=len(sample.all_branches), 
+                           column=e_branch,
+                           value=np.zeros(sample.n_hits),
+                           allow_duplicates=False)
     return sample, empty
 
 def test_flat_hits_empty(flat_hits_empty):
