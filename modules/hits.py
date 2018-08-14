@@ -5,12 +5,10 @@ Notation used below:
  - wire_index is the index of wire in the layer
 """
 from __future__ import print_function
-from collections import OrderedDict
 import numpy as np
 from root_numpy import root2array, list_branches
-import uproot
-import pandas as pd
 from cylinder import CDC, CTH
+from uproot_selected import import_uproot_selected
 
 # TODO swith to pandas
     # TODO move data_tools into hits
@@ -25,173 +23,6 @@ from cylinder import CDC, CTH
         #         * returning results one event at a time
 # TODO run the analysis once
 # TODO change all documentation
-
-def _parse_nested_parens(text, left=r'[(]', right=r'[)]', sep=r','):
-    """
-    This parses nested parentheses into nested lists.  Its lifted from
-    StackOverload.
-    Based on https://stackoverflow.com/a/17141899/190597 (falsetru)
-    """
-    pat = r'({}|{}|{})'.format(left, right, sep)
-    tokens = re.split(pat, text)
-    stack = [[]]
-    for x in tokens:
-        if not x or re.match(sep, x): continue
-        if re.match(left, x):
-            stack[-1].append([])
-            stack.append(stack[-1][-1])
-        elif re.match(right, x):
-            stack.pop()
-            if not stack:
-                raise ValueError('error: opening bracket is missing')
-        else:
-            stack[-1].append(x)
-    if len(stack) > 1:
-        print(stack)
-        raise ValueError('error: closing bracket is missing')
-    return stack.pop()
-
-def _parse_operations(parsed_parenths, oper_dict, join_dict):
-    """
-    This parses each comparison operation string in the nested lists
-    into a (function, branch, value) tuple.
-
-    ex: [["branch_a < 10", "&&", "branch_b > 5"], || "branch_c == 5"] ->
-        [[(np.greater, "branch_a, float(10)), "&&",
-          (np.less,    "branch_b, float(5))], "||",
-         (np.equal, "branch_c", 5)]
-    :param: parse_parenths, list
-        Nested list of lists
-    :param: oper_dict, dict
-        Mapping from operation as string to corresponding np.func
-    :param: join_dict, dict
-        Mapping from joining function to corresponding logical np.func
-    """
-    # Check if its a list, if so, recurse until its a string
-    return_val = []
-    for expression in parsed_parenths:
-        if not isinstance(expression, str):
-            return_val += [_parse_operations(expression, oper_dict, join_dict)]
-        else:
-            # Split the input on whitespace
-            compare = expression.split()
-            # Iterate through
-            for index, expr in enumerate(compare):
-                # Check if our current string is an expression
-                if expr in oper_dict.keys():
-                    return_val += [(oper_dict[expr],
-                                    compare[index-1],
-                                    float(compare[index+1]))]
-                # If its a logical comparison, save it for later
-                elif expr in join_dict.keys():
-                    return_val += [expr]
-    # Return the list
-    return return_val
-
-def _parse_connections(parsed_opts, join_dict):
-    """
-    This parses all the connection operations, and replaces the list nesting
-    with tuple nesting.
-
-    ex: [[(np.greater, "branch_a, float(10)), "&&",
-          (np.less,    "branch_b, float(5))], "||",
-         (np.equal, "branch_c", 5)] ->
-        (np.logical_or,
-         (np.logical_and,
-          (np.greater, 'branch_a', 10.0),
-          (np.less, 'branch_b', 5.0)),
-         (np.equal, 'branch_c', 5.0))
-
-    :param: parse_opts, list
-        Nested lists of operations and joining operation strings
-    :param: join_dict, dict
-        Mapping from joining function to corresponding logical np.func
-    """
-    # Check if its a list
-    if not isinstance(parsed_opts, list):
-        return parsed_opts
-    return_val = _parse_connections(parsed_opts[0], join_dict)
-    for index, expr in enumerate(parsed_opts):
-        # Check if our current string is an expression
-        if isinstance(expr, str) and (expr in join_dict.keys()):
-            # If it is, parse the next operation and join it to the current one
-            next_opt = _parse_connections(parsed_opts[index+1], join_dict)
-            # Nest a tuple of tuples
-            return_val = (join_dict[expr], return_val, next_opt)
-    # Return this new stack of operations
-    return return_val
-
-def _parse_selection(selection_string):
-    """
-    This parses a selection string that worked for root_numpy selection 
-    parameter into nested tuples of operation, branch names, and values. It 
-    assumes white space seperation between between branch names, comparison 
-    operations (<,>,==,!=, etc.), joining operations (&&, ||), and values.  
-    Parentheses need no white spaces.
-
-    ex: "(branch_a < 10 && branch_b < 5) || branch_c == 5"->
-        (np.logical_or,
-         (np.logical_and,
-          (np.greater, 'branch_a', 10.0),
-          (np.less, 'branch_b', 5.0)),
-         (np.equal, 'branch_c', 5.0))
-
-    :param: selection string
-        Selection string that could be passed into root_numpy
-    """
-    # Define all valid operations
-    oper_dict = {"==" : np.equal,
-                 "!=" : np.not_equal,
-                 ">=" : np.greater_equal,
-                 "<=" : np.less_equal,
-                 ">"  : np.greater,
-                 "<"  : np.less}
-    # Define all the connection operations we can do
-    join_dict = {"&&" : np.logical_and,
-                 "||" : np.logical_or}
-    # Start by dealing with parentheses
-    parsed_parenths = _parse_nested_parens(selection_string)
-    # Parse the operations into tuples
-    pars_operations = _parse_operations(parsed_parenths, oper_dict, join_dict)
-    # Parse out the connections
-    connected_opers = _parse_connections(pars_operations, join_dict)
-    return connected_operations
-
-def evaluate_selection(selection_string, data):
-    """
-    Evaluate the selection string over the data, similar to root_numpy selection
-    parameter. This selection string must have at least one white space between
-    branch names, comparison operations, and values, eg:
-
-    "(branch_a < 10 && branch_b < 5) || branch_c == 5" is valid
-
-    "(branch_a<10&&branch_b<5)||branch_c==5" is not valid.
-
-    No white space is needed around the parentheses.  Branch names must come 
-    first in the comparison, i.e. (branch_a < 5) not (5 > branch_a).
-
-    Finally, the data must be able to be indexed by branch name,
-    i.e. data[branch_name] needs to return something that will work inside 
-    np.ufuncs. Pandas DataFrame or numpy structured arrays should work.
-
-    This function returns a boolean mask for numpy structured arrays, and 
-    a boolean series for dataframes.
-
-    :param: selection_string, str
-        A string to define what selections will be made
-    :param: data, dataframe or numpy.record
-        Data whose columns can be indexed by a string
-    """
-    opp, val_a, val_b = _parse_selection(selection_string)
-    # If we've found a float, then we've reach a "branch level"
-    if isinstance(val_b, float):
-        # Cast to the correct type using a numpy hack
-        cast_b = np.asscalar(np.array([val_b], dtype=data[val_a].dtype))
-        # Return the value of the operation
-        return opp(data[val_a], val_b)
-    else:
-        # Otherwise, opp is either && or || and we must dig deeper
-        return opp(eval_stack(val_a, data), eval_stack(val_b, data))
 
 def _is_sequence(arg):
     """
@@ -244,32 +75,15 @@ def check_for_branches(path, tree, branches, soft_check=False, verbose=False):
         # Otherwise return true
     return True
 
-def _add_name_to_branches(path, tree, name, branches, empty_branches):
-    """
-    Determine which list of branches to put this variable
-    """
-    # Check if this file already has one
-    has_name = check_for_branches(path, tree,
-                                  branches=[name],
-                                  soft_check=True)
-    # Check which list to return it to
-    branches = _return_branches_as_list(branches)
-    empty_branches = _return_branches_as_list(empty_branches)
-    if has_name:
-        branches += [name]
-    else:
-        empty_branches += [name]
-    return branches, empty_branches
-
 def map_indexes(old_indexes, new_indexes, force_shape=True):
     # TODO documentation, more
     """
-    Map the values in the old_indexes to the unique values in the new_indexes.  
+    Map the values in the old_indexes to the unique values in the new_indexes.
     This mapping preserves the order in which indexes occur in each set.
     """
-    # Get the information needed for the mapping, which is the correspondence 
+    # Get the information needed for the mapping, which is the correspondence
     # mapping between the two sets of indexes, as generated from numpy.unique
-    v_old, idx_old, inv_old = np.unique(old_indexes, 
+    v_old, idx_old, inv_old = np.unique(old_indexes,
                                         return_index=True,
                                         return_inverse=True)
     v_new, idx_new = np.unique(new_indexes,
@@ -285,14 +99,14 @@ def map_indexes(old_indexes, new_indexes, force_shape=True):
     # The new index values can be longer than the old, but not vice-versa!
     if force_shape:
         new_idx_vals = new_idx_vals[:v_old.shape[0]]
-    # Get the mappings from old keys to new indexes with the order that each 
+    # Get the mappings from old keys to new indexes with the order that each
     # occured first preserved
     map_v = dict(zip(old_idx_vals, new_idx_vals))
-    # Map the old values to the new values, then use the inverse mapping give 
+    # Map the old values to the new values, then use the inverse mapping give
     # from numpy unique for the old indexes
     return np.array([map_v[x] for x in v_old])[inv_old]
 
-class FlatHits(object):
+class FlatHits():
     # pylint: disable=too-many-instance-attributes
     # pylint: disable=bad-continuation
     def __init__(self,
@@ -303,7 +117,6 @@ class FlatHits(object):
                  n_events=None,
                  prefix="CDCHit.f",
                  branches=None,
-                 empty_branches=None,
                  hit_type_name="IsSig",
                  evt_number="EventNumber",
                  hit_number="HitNumber"):
@@ -321,25 +134,14 @@ class FlatHits(object):
         self.hit_type_name = self.prefix + hit_type_name
         # Each hit by hit ID and by event index, where event index is contiguous
         # and starts from zero
-        self.hit_index = "hits_index"
+        self.hit_index = "hit_index"
         self.event_index = "event_index"
 
         # The selection controls which hits are imported
         self.selection = selection
-
-        # Ensure we have a list type of branches and empty branches
-        _empty_branches = _return_branches_as_list(empty_branches)
-        self._branches = _return_branches_as_list(branches)
-        # Add each empty branch to a dictonary that maps to the branches data
-        # type
-        _empty_branches = [b if _is_sequence(b) else (b, np.float32)
-                           for b in _empty_branches]
-        self._e_branch_dict = {b : typ for b, typ in _empty_branches}
         # Add the branches as we expect
+        self._branches = _return_branches_as_list(branches)
         self._branches += [self.hit_type_name, self.evt_number]
-        # Add the indexes as integers
-        self._e_branch_dict[self.hit_index] = np.uint32
-        self._e_branch_dict[self.event_index] = np.uint32
 
         # Get the number of hits for each event, limiting this lookup table if
         # we only want a subset of events
@@ -355,34 +157,34 @@ class FlatHits(object):
         self.data = self._finalize_data(path, tree)
         self._reset_indexes(evt_index=self.data[self.evt_number].values,
                             construction=True)
+    @property
+    def all_branches(self):
+        return self.data.columns.values
 
-    def _import_root_file(self, path, tree, branches, single_perc=True):
+    def _import_root_file(self, path, tree, branches, selection=None,
+                          single_perc=True, num_entires=None):
         """
-        This wraps root2array to protect the user from importing non-existant
-        branches, which cause the program to hang without any error messages
 
         :param path: path to root file
         :param tree: name of tree in root file
         :param branches: required branches
         """
+        # TODO docs
         # Ensure branches is a list
         if not _is_sequence(branches):
             branches = [branches]
         # Check the branches we want are there
         check_for_branches(path, tree, branches)
-        # Import all the data
-        _data = []
+        # Allow for custom selections
+        if selection is None:
+            selection = self.selection
         # Import the branches
-        _some_data = uproot.open(path)[tree].arrays(branches=branches,
-                                                    outputtype=list)
-        #_some_data.columns = [str(col)[2:-1] for col in _some_data.columns.values]
-        ## Convert to single percision if needed
-        #if _b_data.dtype == np.float64 and single_perc:
-        #    _b_data = _b_data.astype(np.float32)
-        # Cache the column to return it
-        #_data += [_b_data]
-        # Return a list of arrays
-        return _some_data
+        data = import_uproot_selected(path, tree, branches,
+                                      selection=selection,
+                                      num_entries=num_entires,
+                                      single_perc=single_perc)
+        # Return the data frame
+        return data
 
     def _count_hits_events(self, path, tree, first_event=0, n_events=None):
         """
@@ -393,9 +195,10 @@ class FlatHits(object):
         _import_branches = [self.evt_number]
         check_for_branches(path, tree, branches=_import_branches)
         # Import the data
-        e_data = root2array(path, treename=tree,
-                            branches=_import_branches,
-                            selection=self.selection)[self.evt_number]
+        e_data = import_uproot_selected(path, tree,
+                                        branches=_import_branches,
+                                        selection=self.selection)
+        e_data = e_data[self.evt_number]
         # Check the hits are sorted by event
         assert np.array_equal(e_data, np.sort(e_data)),\
             "Event index named {} not sorted".format(self.evt_number)
@@ -436,7 +239,7 @@ class FlatHits(object):
         """
         # Get the old index
         old_evt_idx = self.data.index.get_level_values(self.event_index).values
-        # Map the old values onto the new values, this should really just 
+        # Map the old values onto the new values, this should really just
         # recover old_evt_idx if they are consistent!
         new_to_old = map_indexes(idx_new, old_evt_idx, force_shape=False)
         # Check that the old mapping can be recovered from the new one
@@ -448,7 +251,7 @@ class FlatHits(object):
         """
         # Get the old index
         old_evt_idx = self.data.index.get_level_values(self.event_index).values
-        # Map the old values onto the new values, this should really just 
+        # Map the old values onto the new values, this should really just
         # recover old_evt_idx if they are consistent!
         _new_indexes = map_indexes(old_evt_idx, new_indexes)
         self._reset_indexes(evt_index=_new_indexes)
@@ -471,10 +274,10 @@ class FlatHits(object):
         # If so, get the unique values
         _, event_to_n_hits = np.unique(evt_index, return_counts=True)
         # Set the event index
-        self.data.loc[:, self.event_index] = evt_index
+        self.data.loc[:, self.event_index] = evt_index.astype(np.int64)
         # Set the hit index
-        self.data.loc[:, self.hit_index] = \
-            np.concatenate([np.arange(evts) for evts in event_to_n_hits])
+        hit_idx = np.concatenate([np.arange(evts) for evts in event_to_n_hits])
+        self.data.loc[:, self.hit_index] = hit_idx.astype(np.int64)
         # Set the indexes on the data frame
         self.data.set_index([self.event_index, self.hit_index],
                              inplace=True, drop=True)
@@ -493,30 +296,8 @@ class FlatHits(object):
         """
         # Ensure the branch names are unique
         self._branches = sorted(list(set(self._branches)))
-        # Sort the empty branch by keys
-        self._e_branch_dict = OrderedDict(sorted(self._e_branch_dict.items()))
-        # Ensure these lists are mutually exclusive
-        in_both = [b for b in self._e_branch_dict.keys() if b in self._branches]
-        assert not in_both, "Column(s) trying to be imported both as an empty"+\
-            " branch and as a data branch\n{}".format("\n".join(in_both))
         # Import the branches we expect
-        _data = self._import_root_file(path, tree, branches=self._branches)
-        # Remember the order of these branches
-        self.all_branches = self._branches
-        # Add the empty data that will be filled
-        _data += [np.zeros(self.n_hits, dtype=typ)
-                  for typ in self._e_branch_dict.values()]
-        # Set the names of all branches
-        self.all_branches = self._branches + list(self._e_branch_dict.keys())
-        # Return the data as a pandas DataFrame
-        try:
-            return pd.DataFrame.from_dict(dict(zip(self.all_branches, _data)))
-        except ValueError:
-            # Anticipate arrays of different lengths
-            b_shape = ["{}, {}".format(_b, _d.shape)
-                       for _b, _d in zip(self.all_branches, _data)]
-            print("\n".join(b_shape))
-            raise ValueError
+        return self._import_root_file(path, tree, branches=self._branches)
 
     def _get_mask(self, these_hits, variable, values=None, greater_than=None,
                   less_than=None, invert=False):
@@ -618,13 +399,13 @@ class FlatHits(object):
         """
         Append events to the end of an existing sample
         """
-        # Incriment the indexes of the sample to add so that they are higher 
+        # Incriment the indexes of the sample to add so that they are higher
         # than the existing event indexes
         loc_lvl = self.data.index.names.index(self.event_index)
         max_index = np.amax(self.data.index.levels[loc_lvl].values)
         # Set the indexes of the data to add to these new indexes
         new_indexes = np.arange(max_index, max_index + hits_to_add.n_events)
-        # Reset the index, adding one so the range is 
+        # Reset the index, adding one so the range is
         # (max_index, max_index + n_events]
         hits_to_add.set_event_indexes(new_indexes + 1)
         # Append the data as is to the old data
@@ -636,13 +417,13 @@ class FlatHits(object):
         """
         Add hits of two samples to join events
         """
-        # Determine which sample has more events and therefore which indexes to 
+        # Determine which sample has more events and therefore which indexes to
         # remap, defaulting to the assumption that self.data has more events
         origin, to_add = self, hits_to_add
         if fix_indexes:
             if hits_to_add.n_events > self.n_events:
                 origin, to_add = self, hits_to_add
-            # Remap the indexes of the smaller set to match the indexes of the 
+            # Remap the indexes of the smaller set to match the indexes of the
             # larger set
             new_evt_idx = origin.data.index.get_level_values(self.event_index)
             # Set the indexes of the data to add to these new indexes
@@ -708,7 +489,6 @@ class GeomHits(FlatHits):
                  tree='COMETEventsSummary',
                  prefix="CDCHit.f",
                  branches=None,
-                 empty_branches=None,
                  edep_name="Charge",
                  time_name="DetectedTime",
                  flat_name="vol_id",
@@ -728,14 +508,8 @@ class GeomHits(FlatHits):
         """
         # Name the trigger data row
         self.trig_name = prefix + trig_name
-        # Add trig name to branches
-        branches, empty_branches = _add_name_to_branches(path,
-                                                         tree,
-                                                         self.trig_name,
-                                                         branches,
-                                                         empty_branches)
         # Define the names of the time and energy depostition columns
-        branches = _return_branches_as_list(branches) 
+        branches = _return_branches_as_list(branches)
         self.edep_name = prefix + edep_name
         self.time_name = prefix + time_name
         branches += [self.edep_name, self.time_name]
@@ -749,7 +523,6 @@ class GeomHits(FlatHits):
                           path,
                           tree=tree,
                           branches=branches,
-                          empty_branches=empty_branches,
                           prefix=prefix,
                           **kwargs)
 
@@ -837,7 +610,7 @@ class GeomHits(FlatHits):
         hit_vector[sig_vols] = 1
         return hit_vector
 
-    def get_hit_types(self, events, unique=True):
+    def get_hit_types(self, events):
         """
         Returns all hit types, where signal is 1, background is 2,
         nothing is 0.
@@ -903,7 +676,6 @@ class CDCHits(GeomHits):
                  prefix="CDCHit.f",
                  branches=None,
                  flat_name="Channel",
-                 time_offset=None,
                  **kwargs):
         """
         This generates hit data in a structured array from an input root file
@@ -953,7 +725,7 @@ class CDCHits(GeomHits):
         _cached_vals = chan_groups.agg(agg_dict)
         # Get the first element for the rest of the data
         self.data = chan_groups.head(1)
-        # Ensure the channel number match along all events before setting the 
+        # Ensure the channel number match along all events before setting the
         # special information, as an extra precaution
         err = "Improperly trying to set edep and sig label"
         np.testing.assert_allclose(_cached_vals.loc[:, (self.flat_name)],
@@ -967,7 +739,7 @@ class CDCHits(GeomHits):
         self.sort_hits(self.time_name)
 
     def get_measurement(self, name,
-                        events=None, 
+                        events=None,
                         shift=None,
                         default=0,
                         dtype=float,
@@ -979,7 +751,7 @@ class CDCHits(GeomHits):
         the hit does not register this measurement
 
         NOTE: IF COINCIDENCE HASN'T BEEN DEALT WITH THE FIRST HIT ON THE CHANNEL
-        WILL BE TAKEN.  The order is determined by the hits_index
+        WILL BE TAKEN.  The order is determined by the hit_index
 
         :return: numpy.array of shape [len(events), CDC.n_points]
         """
@@ -1126,7 +898,6 @@ class CTHHits(GeomHits):
                  path,
                  tree='COMETEventsSummary',
                  prefix="CTHHit.f",
-                 empty_branches=None,
                  row_name="Channel",
                  idx_name="Counter",
                  time_name="MCPos.fE",
@@ -1146,8 +917,6 @@ class CTHHits(GeomHits):
                            event
         """
         # Add the flat name as an empty branch
-        empty_branches = _return_branches_as_list(empty_branches)
-        empty_branches += [(prefix + flat_name, np.uint16)]
         GeomHits.__init__(self,
                           CTH(),
                           path,
@@ -1155,13 +924,13 @@ class CTHHits(GeomHits):
                           prefix=prefix,
                           flat_name=flat_name,
                           time_name=time_name,
-                          empty_branches=empty_branches,
                           **kwargs)
         # Define the row and idx name
-        self.data[self.flat_name] = self._get_geom_flat_ids(path,
-                                                            tree,
-                                                            prefix+row_name,
-                                                            prefix+idx_name)
+        flat_ids = self._get_geom_flat_ids(path, tree,
+                                           prefix+row_name,
+                                           prefix+idx_name)
+        self.data[self.flat_name] = flat_ids.astype(np.uint16)
+        # TODO check if we should trim this or not
         self.trim_hits(variable=self.flat_name, values=self.geom.fiducial_crys)
         self.sort_hits(self.time_name)
 
@@ -1173,7 +942,8 @@ class CTHHits(GeomHits):
         # Import the data
         branches = [row_name, idx_name]
         chan_data, idx_data = \
-            self._import_root_file(path, tree=tree, branches=branches)
+            self._import_root_file(path, tree,
+                                   branches=branches)[branches].values.T
         # Map from volume names to row indexes
         row_data = np.vectorize(self.geom.chan_to_row)(chan_data)
         # Flatten the volume names and IDs to flat_voldIDs
