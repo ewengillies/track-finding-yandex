@@ -993,11 +993,13 @@ class CTHHits(GeomHits):
         # individually
         self._reset_indexes()
         # Set the time column to a time series for now
-        self.data[self.time_name] = \
-            pd.to_datetime(self.data[self.time_name], unit="ns")
         # Group by event to find trigger signals in each event
-        grp_data = self.data[[self.time_name,
-                              self.flat_name]].groupby([self.event_index])
+        grp_data = pd.DataFrame(self.data[[self.time_name,
+                                           self.flat_name]])
+        grp_data[self.time_name] = \
+            pd.to_datetime(grp_data[self.time_name], unit="ns")
+        grp_data.reset_index(level=self.hit_index, drop=False, inplace=True)
+        grp_data = grp_data.groupby([self.event_index])
         # Define a lambda function to pass in the arguments we want to use in
         # this iteration of the signal
         trig_scan = partial(self._scan_trigger_windows, t_win=t_win, t_del=t_del)
@@ -1007,25 +1009,26 @@ class CTHHits(GeomHits):
         if n_proc == 1:
             trig_hit_idxs = grp_data.apply(trig_scan)
             trig_hit_idxs = trig_hit_idxs.dropna().values
+            # Return None if there are no hit ids
+            if trig_hit_idxs.shape[0] == 0:
+                return None
         # Open up a pool of CPUs otherwise
         else:
             # Using all CPUs if n_proc is none
             if n_proc is None:
                 n_proc = mp.cpu_count()
-            print("Using ", n_proc)
             # Open the pool
             with mp.Pool(n_proc) as pool:
                 trig_hit_idxs = pool.map(trig_scan, [grp for _, grp in grp_data])
             # Return the values
             trig_hit_idxs = [item for item in trig_hit_idxs if item is not None]
-        # Set the time column to a time series for now
-        self.data[self.time_name] = \
-            pd.to_numeric(self.data[self.time_name], downcast="float")
+            # Return None if there are none
+            if not trig_hit_idxs:
+                return None
         # Return the correct indexes
         return np.sort(np.concatenate(trig_hit_idxs))
 
     def _scan_trigger_windows(self, group, t_win=50, t_del=10):
-        # TODO document
         # Skip if its empty or if its too small
         if group.shape[0] < self.trig_patterns.shape[1]:
             return None
@@ -1065,7 +1068,7 @@ class CTHHits(GeomHits):
         # Find the minimum time across all patterns
         min_t_hits = (pd.Timestamp.max, None)
         hit_times = group[self.time_name].values
-        hit_indexes = group.index.get_level_values(self.hit_index)
+        hit_indexes = group[self.hit_index].values
         for pattern in self.trig_patterns[trig_ptrns, :]:
             # Check which hits made the pattern in this group
             hit_ids = np.in1d(vol_ids, pattern)
