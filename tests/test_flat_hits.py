@@ -50,7 +50,6 @@ def generate_reference(reference_file, sample, n_branches, desired_branches):
         # Otherwise assume its already a numpy array
         except AttributeError:
             np.savez(reference_file, array=sample)
-        #raise AssertionError("Generated new reference, test is tautological")
 
 def filter_branches(branches):
     """
@@ -73,7 +72,7 @@ def check_columns(sample, reference_data):
     Helper function to ensure all columns are imported
     """
     ref_columns = sorted(list(reference_data.dtype.names))
-    new_columns = sorted(list(sample.data.columns.values))
+    new_columns = sorted(list(sample.all_branches))
     miss_cols = list(set(new_columns) - set(ref_columns))
     assert not miss_cols, "Columns in loaded sample are not found in "+\
         "reference sample \n{}".format("\n".join(miss_cols))
@@ -82,7 +81,7 @@ def check_data(sample, reference_data):
     """
     Helper function to ensure all columns are imported
     """
-    for col in sample.data.columns.values:
+    for col in sample.all_branches:
         new_data = sample.data[col].values
         print("Checking column:", col)
         ref_data = reference_data[col]
@@ -123,7 +122,7 @@ def check_fetched_events(event_data_before, event_data_after, sample):
     """
     Check that everything looks okay after things were reindexed
     """
-    for branch in sample.data.columns.values:
+    for branch in sample.all_branches:
         assert_allclose(event_data_before[branch],
                         event_data_after[branch],
                         err_msg=branch)
@@ -145,6 +144,15 @@ def check_fetched_events(event_data_before, event_data_after, sample):
         gen_hit_idx = [np.arange(first, last+1) for first, last in
                        zip(hit_index[first_hit], hit_index[last_hit])]
         assert_allclose(hit_index, np.concatenate(gen_hit_idx), err_msg=err)
+
+# TRIVIAL TESTING ##############################################################
+
+def test_generate_reference():
+    """
+    Make sure GENERATE_REFERENCE is not left in the ON position without noticing
+    """
+    assert not GENERATE_REFERENCE,\
+        "Generating the reference, most testing is tautologically correct"
 
 # TEST HELPER FUNCTIONS ########################################################
 
@@ -234,7 +242,7 @@ def flat_hits_and_ref(flat_hits):
     reference_file = file+"_"+geom+".npz"
     # Generate the referece file if needed
     if GENERATE_REFERENCE:
-        n_branches = len(sample.data.columns.values)
+        n_branches = len(sample.all_branches)
         generate_reference(reference_file,
                            sample.data,
                            n_branches,
@@ -252,7 +260,7 @@ def test_all_branches_present(flat_hits_and_ref):
     # Ensure we have the right number of branches if we requested all of them
     if rqst_branches == 'all':
         ref_branches = reference_data.dtype.names
-        smp_branches = sample.data.columns.values
+        smp_branches = sample.all_branches
         miss = [b for b in ref_branches if b not in smp_branches]
         assert not miss,\
             "Requested all branches, but did not find {}".format("\n".join(miss))
@@ -496,7 +504,7 @@ def events_and_ref_data(flat_hits, event_params):
     ref_file = file + "_" + geom + "_eventdata_"+str(file_index)+".npz"
     # Generate the reference data if needed
     if GENERATE_REFERENCE:
-        n_branches = len(sample.data.columns.values)
+        n_branches = len(sample.all_branches)
         generate_reference(ref_file,
                            sample.get_events(events),
                            n_branches,
@@ -511,7 +519,7 @@ def test_get_event(events_and_ref_data):
     # Unpack the data
     sample, ref_data, events, _ = events_and_ref_data
     event_data = sample.get_events(events)
-    for branch in sample.data.columns.values:
+    for branch in sample.all_branches:
         assert_allclose(ref_data[branch], event_data[branch])
 
 @pytest.mark.parametrize("remove_event", [0, 1, 5, 10])
@@ -589,7 +597,7 @@ def test_get_signal_hits(events_and_ref_data):
     sample, ref_data, events, _ = events_and_ref_data
     event_data = sample.get_signal_hits(events)
     test_ref = ref_data[ref_data[sample.hit_type_name]]
-    for branch in sample.data.columns.values:
+    for branch in sample.all_branches:
         assert_allclose(test_ref[branch], event_data[branch])
 
 def test_get_background_hits(events_and_ref_data):
@@ -600,7 +608,7 @@ def test_get_background_hits(events_and_ref_data):
     sample, ref_data, events, _ = events_and_ref_data
     event_data = sample.get_background_hits(events)
     test_ref = ref_data[~ref_data[sample.hit_type_name]]
-    for branch in sample.data.columns.values:
+    for branch in sample.all_branches:
         assert_allclose(test_ref[branch], event_data[branch])
 
 @pytest.mark.parametrize("sort_branch, ascending", [
@@ -626,7 +634,7 @@ def test_sort_hits(events_and_ref_data, sort_branch, ascending):
     sample.sort_hits(sort_branch, ascending=ascending)
     event_data = sample.get_events(events)
     # Check that it worked
-    for branch in sample.data.columns.values:
+    for branch in sample.all_branches:
         error_msg = "Branch {} not sorted".format(branch)
         assert_allclose(test_ref[branch],
                         event_data[branch],
@@ -707,7 +715,7 @@ def test_add_hits_by_event(flat_hits, keep_n_events):
     # Add the hits together, adding in the reversed data
     sample.add_hits(sample_copy)
     # Rigourously sort the hits in each event to compare them
-    sample.sort_hits(sample.data.columns.values, reset_index=False)
+    sample.sort_hits(sample.all_branches, reset_index=False)
     # Check that the data is now symmetreic
     evt_range = np.arange(sample.n_events)
     if keep_n_events is not None:
@@ -717,7 +725,7 @@ def test_add_hits_by_event(flat_hits, keep_n_events):
         end_data = sample.get_events(end)
         print(np.unique(beg_data[sample.evt_number]))
         print(np.unique(end_data[sample.evt_number]))
-        for col in sample.data.columns.values:
+        for col in sample.all_branches:
             assert_allclose(beg_data[col].values,
                             end_data[col].values,
                             err_msg=col)
@@ -739,7 +747,7 @@ def test_add_events(flat_hits, keep_n_events):
     # Add the hits together, adding in the reversed data
     sample.add_events(sample_copy)
     # Rigourously sort the hits in each event to compare them
-    sample.sort_hits(sample.data.columns.values, reset_index=False)
+    sample.sort_hits(sample.all_branches, reset_index=False)
     # Check that the data is now symmetreic
     evt_range = np.arange(n_orig_events)
     evts_added = keep_n_events
@@ -753,7 +761,7 @@ def test_add_events(flat_hits, keep_n_events):
     for beg, end in zip(evt_range, evt_range + n_orig_events):
         beg_data = sample.get_events(beg)
         end_data = sample.get_events(end)
-        for col in sample.data.columns.values:
+        for col in sample.all_branches:
             assert_allclose(beg_data[col].values,
                             end_data[col].values,
                             err_msg="{} {} {}".format(col, beg, end))
