@@ -8,11 +8,12 @@ from __future__ import print_function
 import numpy as np
 from cylinder import CDC, CTH
 from uproot_selected import import_uproot_selected, check_for_branches
+import pandas as pd
+import multiprocessing as mp
+from functools import partial
 
 # TODO swith to pandas
     # TODO move data_tools into hits
-    # TODO improve CTH tigger logic to have time window
-    # TODO improve CTH hits to sum over 10ns bins
     # TODO deal with multi-indexing events from evt_number
         # TODO deal with empty CTH events or empty CDC events:
         #      sparse DF with both CTH and CDC hits.
@@ -145,6 +146,10 @@ class FlatHits():
         # Ensure branches is a list
         if not _is_sequence(branches):
             branches = [branches]
+        # Add the prefix
+        branches = [self.prefix + b
+                    if self.prefix not in b else b
+                    for b in branches]
         # Check the branches we want are there
         check_for_branches(path, tree, branches)
         # Allow for custom selections
@@ -463,7 +468,7 @@ class GeomHits(FlatHits):
                  edep_name="Charge",
                  time_name="DetectedTime",
                  flat_name="vol_id",
-                 trig_name="TrigTime",
+                 trig_time="TrigTime",
                  **kwargs):
         """
         This generates hit data in a structured array from an input root file
@@ -478,7 +483,7 @@ class GeomHits(FlatHits):
                            event
         """
         # Name the trigger data row
-        self.trig_name = prefix + trig_name
+        self.trig_time = prefix + trig_time
         # Define the names of the time and energy depostition columns
         branches = _return_branches_as_list(branches)
         self.edep_name = prefix + edep_name
@@ -623,7 +628,7 @@ class GeomHits(FlatHits):
         # Check the trigger time has been set
         assert "CDCHit.fTrigTime" in self.all_branches,\
                 "Trigger time has not been set yet"
-        return self.get_measurement(events, self.trig_name)
+        return self.get_measurement(events, self.trig_time)
 
     def get_relative_time(self, events):
         """
@@ -673,7 +678,7 @@ class CDCHits(GeomHits):
         # Sort the hits by time
         self.sort_hits(self.time_name)
 
-    def remove_coincidence(self, sort_hits=True):
+    def remove_coincidence(self):
         """
         Removes the coincidence by:
             * Summing the energy deposition
@@ -682,29 +687,17 @@ class CDCHits(GeomHits):
         """
         # Sort the hits by channel and by time
         self.sort_hits([self.flat_name, self.time_name])
-        # Group by the channels
-        chan_groups = self.data.groupby([self.event_index,
-                                         self.flat_name])
         # Ensure we sum the energy deposition and keep the signal labels
-        agg_dict = {}
+        agg_dict = {branch : 'first' for branch in self.all_branches}
         agg_dict[self.edep_name] = 'sum'
         agg_dict[self.hit_type_name] = 'any'
-        agg_dict[self.flat_name] = 'mean'
-        # Evaluate the groups for these two special cases
-        _cached_vals = chan_groups.agg(agg_dict)
-        # Get the first element for the rest of the data
-        self.data = chan_groups.head(1)
-        # Ensure the channel number match along all events before setting the
-        # special information, as an extra precaution
-        err = "Improperly trying to set edep and sig label"
-        np.testing.assert_allclose(_cached_vals.loc[:, (self.flat_name)],
-                                   self.data.loc[:, (self.flat_name)],
-                                   err_msg=err)
-        # Reset the special data
-        self.data.loc[:, (self.edep_name, self.hit_type_name)] =\
-            _cached_vals.loc[:, (self.edep_name, self.hit_type_name)].values
+        # Group by the channels
+        group_list = [self.event_index, self.flat_name]
+        grp_data = self.data.groupby(group_list, sort=False)
+        # Aggregate the data and reset the indexes
+        self.data = grp_data.agg(agg_dict)
+        self.data.reset_index(level=group_list[1:], drop=True, inplace=True)
         # Sort the hits by time again
-        # TODO remove once over
         self.sort_hits(self.time_name)
 
     def get_measurement(self, name,
@@ -871,6 +864,7 @@ class CTHHits(GeomHits):
                  idx_name="Counter",
                  time_name="MCPos.fE",
                  flat_name="vol_id",
+                 trig_name="IsTrig",
                  **kwargs):
         """
         This generates hit data in a structured array from an input root file
@@ -899,9 +893,189 @@ class CTHHits(GeomHits):
                                            prefix+row_name,
                                            prefix+idx_name)
         self.data[self.flat_name] = flat_ids.astype(np.uint16)
-        # TODO check if we should trim this or not
+        # TODO this removes scintilator light guide hits.  Instead, gain match
+        # them to the scintillator outputs
         self.trim_hits(variable=self.flat_name, values=self.geom.fiducial_crys)
+        # Set the timing column to a
         self.sort_hits(self.time_name)
+        # Return the trigger patterns
+        self.trig_patterns = self.get_trigger_pattern()
+        # Set the name of the trigger column
+        self.trig_name = self.prefix + trig_name
+        # TODO modulo the signal timing?
+
+    def get_trigger_pattern(self, n_coincidence=2, max_offset=1):
+        """
+        Set the trigger pattern, defaulting to a four fold coincidence with
+        a maximal offset of 1 between scintillator and cherenkov pairs
+        """
+        # TODO documentation
+        # Determine all allowed offset volumes
+        off_vals = list(range(-max_offset, max_offset + 1))
+        # Generate the volume pairs
+        vol_pairs = np.array([self.geom.shift_wires(idx)
+                              for idx in range(n_coincidence)]).T
+        vol_pairs = vol_pairs.astype(np.uint16)
+        # Generate the output
+        arrays = []
+        # Generate the signals
+        for c_vols, s_vols in zip([self.geom.up_cher, self.geom.down_cher],
+                                  [self.geom.up_scin, self.geom.down_scin]):
+            cher_pairs = vol_pairs[c_vols]
+            scin_pairs = vol_pairs[s_vols]
+            # Roll the pairs to allow for one offset between upper and lower
+            # pair matching
+            for offset in off_vals:
+                arrays += [np.hstack([cher_pairs, np.roll(scin_pairs,
+                                                          offset,
+                                                          axis=0)])]
+        # Provide the trigger sets of data
+        return np.vstack(arrays)
+
+    def rebin_time(self, t_bin_ns=10):
+        """
+        Removes the coincidence by:
+            * Summing the energy deposition
+            * Taking a signal hit label if it exists on the channel
+            * Taking the rest of the values from the earliest hit on the channel
+        """
+        # TODO documentation
+        # Ensure we sum the energy deposition and keep the signal labels
+        agg_dict = {branch : 'first' for branch in self.all_branches}
+        agg_dict[self.edep_name] = 'sum'
+        agg_dict[self.hit_type_name] = 'any'
+        # Set the time column to a time series for now
+        self.data[self.time_name] = \
+            pd.to_datetime(self.data[self.time_name], unit="ns")
+        # Group by the event, channels, and rebin to (t_bins_ns*ns) time bins
+        time_freq = "{}N".format(t_bin_ns)
+        group_list = [self.event_index,
+                      self.flat_name,
+                      pd.Grouper(key=self.time_name, freq=time_freq)]
+        grp_data = self.data.groupby(group_list)
+        # Aggregate the data and reset the indexes
+        self.data = grp_data.agg(agg_dict)
+        self.data.reset_index(level=[1, 2], drop=True, inplace=True)
+        # Sort by time first for good measure
+        self.data[self.time_name] = \
+            pd.to_numeric(self.data[self.time_name], downcast="float")
+        self.sort_hits(self.time_name)
+
+    def set_trigger_hits(self, column=None,
+                         t_win=50, t_del=10,
+                         n_proc=1):
+        """
+        Set the data column to denote which hits contain the trigger signal
+        """
+        # TODO documentation
+        # Get the default name for the trigger signal labelling
+        if column is None:
+            column = self.trig_name
+        # Prefix the column if needed
+        if self.prefix not in column:
+            column += self.prefix
+        # Make a new boolean array with default false values for each hit
+        trigger_data = np.zeros(self.n_hits, dtype=bool)
+        trigger_hits = self.get_trigger_hits(t_win=t_win,
+                                             t_del=t_del,
+                                             n_proc=n_proc)
+        print(trigger_hits)
+        # Set the trigger data column
+        trigger_data[trigger_hits] = True
+        # Add this column to the data
+        self.data[self.trig_name] = trigger_data
+
+    def get_trigger_hits(self, t_win=50, t_del=10, n_proc=1):
+        """
+        Get the indexes of the hits that make up the trigger signal
+        """
+        # Reset the index to ensure self.hit_index labels each datum
+        # individually
+        self._reset_indexes()
+        # Set the time column to a time series for now
+        self.data[self.time_name] = \
+            pd.to_datetime(self.data[self.time_name], unit="ns")
+        # Group by event to find trigger signals in each event
+        grp_data = self.data[[self.time_name,
+                              self.flat_name]].groupby([self.event_index])
+        # Define a lambda function to pass in the arguments we want to use in
+        # this iteration of the signal
+        trig_scan = partial(self._scan_trigger_windows, t_win=t_win, t_del=t_del)
+        # Find the trigger
+        trig_hit_idxs = None
+        # Use sequential mode if only one cpu requested
+        if n_proc == 1:
+            trig_hit_idxs = grp_data.apply(trig_scan)
+            trig_hit_idxs = trig_hit_idxs.dropna().values
+        # Open up a pool of CPUs otherwise
+        else:
+            # Using all CPUs if n_proc is none
+            if n_proc is None:
+                n_proc = mp.cpu_count()
+            print("Using ", n_proc)
+            # Open the pool
+            with mp.Pool(n_proc) as pool:
+                trig_hit_idxs = pool.map(trig_scan, [grp for _, grp in grp_data])
+            # Return the values
+            trig_hit_idxs = [item for item in trig_hit_idxs if item is not None]
+        # Set the time column to a time series for now
+        self.data[self.time_name] = \
+            pd.to_numeric(self.data[self.time_name], downcast="float")
+        # Return the correct indexes
+        return np.sort(np.concatenate(trig_hit_idxs))
+
+    def _scan_trigger_windows(self, group, t_win=50, t_del=10):
+        # TODO document
+        # Skip if its empty or if its too small
+        if group.shape[0] < self.trig_patterns.shape[1]:
+            return None
+        # Get the time units needed
+        t_window = pd.Timedelta(nanoseconds=t_win)
+        # Iterate over the ranges and get the absolute minimum time if any
+        min_t_hits = (None, None)
+        for t_start in np.arange(0, t_win, t_del):
+            # Get the trigger sets in this group
+            # TODO iterate through in order of t_start
+            trig_set = group.groupby(pd.Grouper(key=self.time_name,
+                                                freq=str(t_win)+"N",
+                                                base=t_start))
+            trig_set = trig_set.apply(self._find_trigger_pattern).values
+            # Iterate through the results
+            for trig in [trig for trig in trig_set if trig is not None]:
+                # Check if we have a new minimum time trigger
+                if (min_t_hits[0] is None) or (trig[0] < min_t_hits[0]):
+                    min_t_hits = trig
+        # Return the hit indexes that form the minimum
+        return min_t_hits[1]
+
+    def _find_trigger_pattern(self, group):
+        # TODO document
+        # Skip if its empty or if its too small
+        if group.shape[0] < self.trig_patterns.shape[1]:
+            return None
+        # Volume ids and hit times
+        vol_ids = group[self.flat_name].values
+        # Get if the trigger sets are found in the volume ids
+        trig_vols = np.isin(self.trig_patterns, vol_ids)
+        # Find the rows where the whole pattern is matched
+        trig_ptrns = np.sum(trig_vols, axis=1) == self.trig_patterns.shape[1]
+        # Return nothing if nothing found
+        if not np.any(trig_ptrns):
+            return None
+        # Find the minimum time across all patterns
+        min_t_hits = (pd.Timestamp.max, None)
+        hit_times = group[self.time_name].values
+        hit_indexes = group.index.get_level_values(self.hit_index)
+        for pattern in self.trig_patterns[trig_ptrns, :]:
+            # Check which hits made the pattern in this group
+            hit_ids = np.in1d(vol_ids, pattern)
+            # Find their minimum time
+            min_time = np.amin(hit_times[hit_ids])
+            # Set this to the return value if needed
+            if min_t_hits[0] > min_time:
+                min_t_hits = (min_time, hit_indexes[hit_ids])
+        # Map this back to the ids of the found pattern
+        return min_t_hits
 
     def _get_geom_flat_ids(self, path, tree, row_name, idx_name):
         """
@@ -976,7 +1150,7 @@ class CTHHits(GeomHits):
         # Sort by time first
         self.sort_hits(self.time_name)
         # Reset the trigger timing
-        self.data[self.trig_name] = 0
+        self.data[self.trig_time] = 0
         for event in range(self.n_events):
             # Get the volumes with hits for these events
             vol_types = self.get_vol_types(event)
@@ -988,7 +1162,8 @@ class CTHHits(GeomHits):
             # TODO change for dataframe
             trig_hits = self.filter_hits(self.flat_name,
                                          these_hits=self.get_events(event),
-                                         values=trig_vols)[self.hit_index]
+                                         values=trig_vols)
+            trig_hits = trig_hits.index.get_level_values(self.hit_index)
             # Get the indexes where these volumes first appear in the
             # (event,time) sorted data
             _, uniq_idxs = np.unique(self.data[self.flat_name][trig_hits],
@@ -1003,7 +1178,7 @@ class CTHHits(GeomHits):
                       "Trig vols : {}\n".format(trig_vols)+\
                       "Uniq idx : {}\n".format(uniq_idxs)+\
                       "Event : {}".format(event))
-            self.data[self.trig_name][trig_hits] = \
+            self.data[self.trig_time][trig_hits] = \
                     self.data[self.time_name][fourth_vol_hit]
 
 # TODO move these into get measurement
@@ -1013,7 +1188,7 @@ class CTHHits(GeomHits):
         Return the trigger hit hit_index in the given event
         """
         # Find the hit indexes of all the volumes that have hits
-        return self.filter_hits(self.trig_name,
+        return self.filter_hits(self.trig_time,
                                 these_hits=self.get_events(events),
                                 values=0,
                                 invert=True)[self.hit_index]
@@ -1078,11 +1253,11 @@ class CyDetHits(FlatHits):
         # Broadcase this value to all CDC hits in the event
         for event in range(self.cth.n_events):
             # Get all the trigger times in  this event
-            all_trig = np.unique(self.cth.get_events(event)[self.cth.trig_name])
+            all_trig = np.unique(self.cth.get_events(event)[self.cth.trig_time])
             # Remove the zero values
             evt_trig = np.trim_zeros(all_trig)
             # Broadcast this value to all CDC hits in this event
-            self.cdc.data[self.cdc.trig_name][self.cdc.event_to_hits[event]] = \
+            self.cdc.data[self.cdc.trig_time][self.cdc.event_to_hits[event]] = \
                 evt_trig
 
     def print_branches(self):
