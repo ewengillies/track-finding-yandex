@@ -6,6 +6,7 @@ from math import floor
 import pytest
 import numpy as np
 from numpy.testing import assert_allclose
+from pandas.util.testing import assert_frame_equal
 from test_flat_hits import check_columns, check_data,\
                            filter_branches, generate_reference
 from test_flat_hits import FILES, NAMES, BRANCHES, GENERATE_REFERENCE
@@ -408,7 +409,7 @@ def test_set_trig(cth_with_trig_hits, n_proc):
         "Found no trigger hits in any events!"
     # Ensure they were set correctly
     trig_hit_idx = \
-        sample.get_trigger_hits(t_win=t_win, t_del=t_del, n_proc=n_proc)
+        sample.find_trigger_hits(t_win=t_win, t_del=t_del, n_proc=n_proc)
     assert_allclose(trig_hits.index.get_level_values(sample.hit_index),
                     trig_hit_idx)
 
@@ -527,3 +528,38 @@ def test_trig_hits_ref(cth_with_trig_hits):
     for col in sample.all_branches:
         assert_allclose(sample.data[col], reference_data[col], err_msg=col)
         print("PASSED : ", col)
+
+@pytest.mark.parametrize("events", [0, 10, [4, 3], None])
+def test_trig_hits_getters(cth_with_trig_hits, events):
+    """
+    Ensure the correct number of hits are found
+    """
+    # Unpack the information
+    sample, _, _, _, _ = cth_with_trig_hits
+    # Get the trigger hits
+    trig_hits_ref = sample.get_events(events)
+    trig_hits_ref = trig_hits_ref[trig_hits_ref[sample.trig_name]]
+    evt_lvl = trig_hits_ref.index.names.index(sample.event_index)
+    # Test getting the trigger hits
+    trig_hits_get = sample.get_trigger_hits(events=events)
+    # Test that the trigger hits retrieved are the same
+    assert_frame_equal(trig_hits_ref, trig_hits_get)
+    # Test that the event indexes are the same
+    ref_evt_idxs = trig_hits_ref.index.unique(level=sample.event_index)
+    trig_hits_e_idx = sample.get_trigger_evt_idxs(events=events)
+    assert_allclose(ref_evt_idxs, trig_hits_e_idx)
+    # Test that the hit indexes are the same
+    ref_hit_idxs = trig_hits_ref.index.get_level_values(level=sample.hit_index)
+    trig_hits_h_idx = sample.get_trigger_hit_idxs(events=events)
+    assert_allclose(ref_hit_idxs, trig_hits_h_idx)
+    # Test that the time recieved is correct
+    trig_time_get = sample.get_trigger_time(events=events)
+    for evt_idx in ref_evt_idxs:
+        ref_trig_time = np.amin(trig_hits_ref.loc[evt_idx][sample.time_name])
+        assert_allclose(ref_trig_time, trig_time_get.loc[evt_idx])
+    # Get the trigger vector from this sample
+    trig_vect_get = sample.get_trigger_vector(events=events)
+    trig_vect_ref = trig_hits_ref[sample.flat_name]
+    for new_idx, ref_idx in enumerate(ref_evt_idxs):
+        assert_allclose(np.nonzero(trig_vect_get[new_idx])[0],
+                        np.unique(trig_vect_ref.loc[ref_idx].values))

@@ -5,13 +5,13 @@ Notation used below:
  - wire_index is the index of wire in the layer
 """
 from __future__ import print_function
-import numpy as np
 from math import ceil
-from cylinder import CDC, CTH
-from uproot_selected import import_uproot_selected, check_for_branches
-import pandas as pd
 import multiprocessing as mp
 from functools import partial
+import numpy as np
+import pandas as pd
+from cylinder import CDC, CTH
+from uproot_selected import import_uproot_selected, check_for_branches
 
 # TODO swith to pandas
     # TODO move data_tools into hits
@@ -31,6 +31,9 @@ def _is_sequence(arg):
     """
     # Check for strings
     if hasattr(arg, "strip"):
+        return False
+    # Check for numpy scalars
+    if np.isscalar(arg):
         return False
     # Check for iterable or indexable items
     if hasattr(arg, "__getitem__") or hasattr(arg, "__iter__"):
@@ -78,7 +81,7 @@ def map_indexes(old_indexes, new_indexes, force_shape=True):
     map_v = dict(zip(old_idx_vals, new_idx_vals))
     # Map the old values to the new values, then use the inverse mapping give
     # from numpy unique for the old indexes
-    return np.array([map_v[x] for x in v_old])[inv_old]
+    return np.array([map_v[x] for x in v_old]).astype(np.int64)[inv_old]
 
 class FlatHits():
     # pylint: disable=too-many-instance-attributes
@@ -312,6 +315,9 @@ class FlatHits():
         # Return all events by default
         loc_lvl = self.data.index.names.index(self.event_index)
         loc_val = self.data.index.levels[loc_lvl][events]
+        # Ensure its still a sequence so a multiindex data frame is returned
+        if not _is_sequence(loc_val):
+            loc_val = [loc_val]
         return self.data.loc[loc_val]
 
     def trim_events(self, events):
@@ -986,16 +992,16 @@ class CTHHits(GeomHits):
             column += self.prefix
         # Make a new boolean array with default false values for each hit
         trigger_data = np.zeros(self.n_hits, dtype=bool)
-        trigger_hits = self.get_trigger_hits(t_win=t_win,
-                                             t_del=t_del,
-                                             n_proc=n_proc)
+        trigger_hits = self.find_trigger_hits(t_win=t_win,
+                                              t_del=t_del,
+                                              n_proc=n_proc)
         # Set the trigger data column
         if trigger_hits is not None:
             trigger_data[trigger_hits] = True
         # Add this column to the data
         self.data[self.trig_name] = trigger_data
 
-    def get_trigger_hits(self, t_win=50, t_del=10, n_proc=1):
+    def find_trigger_hits(self, t_win=50, t_del=10, n_proc=1):
         """
         Get the indexes of the hits that make up the trigger signal
         """
@@ -1146,105 +1152,63 @@ class CTHHits(GeomHits):
                                       values=self.geom.down_crys)
         return events
 
-    def _find_trigger_signal(self, vol_types):
+    def get_trigger_hits(self, events=None):
         """
-        Returns the volumes that take part in the trigger pattern given an array
-        of volume types
-
-        :param vol_types: np.array of shape [self.geom.n_points] whose value is
-                          non-zero for a volume hit
-        :return trig_vols: np.array of shape [self.geom.n_points] whose value is
-                           1 for all volumes that form a trigger shape
+        Return all of the the trigger hits from the requested events
         """
-        # Get all volumes with pairs
-        hit_and_left = np.logical_and(vol_types,
-                                      vol_types[self.geom.shift_wires(1)])
-        hit_and_right = np.logical_and(vol_types,
-                                       vol_types[self.geom.shift_wires(-1)])
-        trig_crys = np.logical_or(hit_and_left, hit_and_right)
-        # Get volumes with crystals hit above or below
-        on_top = np.logical_and(trig_crys[self.geom.cher_crys],
-                                trig_crys[self.geom.scin_crys])
-        trig_crys[self.geom.cher_crys] = on_top
-        trig_crys[self.geom.scin_crys] = on_top
-        # Include the crystals to the left and right of these volumes
-        trig_crys = np.logical_or.reduce((trig_crys,
-                                          trig_crys[self.geom.shift_wires(1)],
-                                          trig_crys[self.geom.shift_wires(-1)]))
-        # Return the volumes that pass and have hits
-        return np.logical_and(vol_types, trig_crys)
-
-
-    def set_trigger_time(self):
-        # Sort by time first
-        self.sort_hits(self.time_name)
-        # Reset the trigger timing
-        self.data[self.trig_time] = 0
-        for event in range(self.n_events):
-            # Get the volumes with hits for these events
-            vol_types = self.get_vol_types(event)
-            trig_vols = np.nonzero(self._find_trigger_signal(vol_types))[0]
-            # Skip the event if there is no trigger
-            if len(trig_vols) == 0:
-                continue
-            # Find the hit indexes of all the volumes that have hits
-            # TODO change for dataframe
-            trig_hits = self.filter_hits(self.flat_name,
-                                         these_hits=self.get_events(event),
-                                         values=trig_vols)
-            trig_hits = trig_hits.index.get_level_values(self.hit_index)
-            # Get the indexes where these volumes first appear in the
-            # (event,time) sorted data
-            _, uniq_idxs = np.unique(self.data[self.flat_name][trig_hits],
-                                     return_index=True)
-            # Get as close to the fourth hit as possible, but not less
-            uniq_idxs = uniq_idxs[uniq_idxs > 2]
-            try:
-                fourth_uniq_hit = uniq_idxs[(np.abs(uniq_idxs-3)).argmin()]
-                fourth_vol_hit = trig_hits[fourth_uniq_hit]
-            except:
-                print("Error in trigger logic!!\n"+\
-                      "Trig vols : {}\n".format(trig_vols)+\
-                      "Uniq idx : {}\n".format(uniq_idxs)+\
-                      "Event : {}".format(event))
-            self.data[self.trig_time][trig_hits] = \
-                    self.data[self.time_name][fourth_vol_hit]
-
-# TODO move these into get measurement
-
-    def get_trig_hits(self, events=None):
-        """
-        Return the trigger hit hit_index in the given event
-        """
+        # TODO documentation
         # Find the hit indexes of all the volumes that have hits
-        return self.filter_hits(self.trig_time,
+        return self.filter_hits(self.trig_name,
                                 these_hits=self.get_events(events),
-                                values=0,
-                                invert=True)[self.hit_index]
+                                values=True)
 
-    def get_trig_evts(self, events=None):
-        """
-        Return the trigger events by EventNumber
-        """
-        # Find the hit indexes of all the volumes that have hits
-        # TODO have this not return keyname, this is dangerous for hit merging
-        return np.unique(self.data[self.get_trig_hits(events)][self.evt_number])
+    def get_trigger_time(self, events=None):
+        # TODO documentation
+        # Get all the trigger hits
+        trig_hits = self.get_trigger_hits(events=events)
+        # Group by event index and return the minimum
+        return trig_hits[self.time_name].groupby(self.event_index).min()
 
-    def get_trig_vector(self, events):
+    def get_trigger_hit_idxs(self, events=None):
+        """
+        Return all of the hit indexes of all trigger hits
+        """
+        # TODO documentation
+        # Get all the trigger hits
+        trig_hits = self.get_trigger_hits(events=events)
+        # Return the hit index of these hits
+        return trig_hits.index.get_level_values(self.hit_index)
+
+    def get_trigger_evt_idxs(self, events=None):
+        """
+        Return the trigger events by event index number
+        """
+        # Get all the trigger hits
+        trig_hits = self.get_trigger_hits(events=events)
+        # Return the hit index of these hits
+        return np.unique(trig_hits.index.get_level_values(self.event_index))
+
+    def get_trigger_vector(self, events):
         """
         Return the shape [events, self.geom.n_points], where 1 is a triggered
         volume
         """
+        # Check if events is none
+        if events is None:
+            events = np.arange(self.n_events)
         # Allow for a single event
         if not _is_sequence(events):
             events = [events]
         # Find the hit indexes of all the volumes that have hits
-        trig_vector = np.zeros((len(events), self.geom.n_points))
-        for index, evt in enumerate(events):
-            trig_vols = self.data[self.flat_name][self.get_trig_hits(evt)]
-            trig_vols = np.unique(trig_vols)
-            trig_vector[index, trig_vols] = 1
-        return trig_vector[:, self.geom.fiducial_crys]
+        trig_vector = np.zeros((len(events), self.geom.n_points), dtype=bool)
+        # Get the trigger hits
+        trig_hits = self.get_trigger_hits(events=events)
+        vol_indexes = trig_hits[self.flat_name].values
+        evt_indexes = trig_hits.index.get_level_values(self.event_index)
+        evt_indexes = map_indexes(evt_indexes, np.arange(len(events)))
+        # Mark the ones with a trigger as true
+        trig_vector[evt_indexes, vol_indexes] = True
+        return trig_vector
 
 class CyDetHits(FlatHits):
     # pylint: disable=too-many-instance-attributes
