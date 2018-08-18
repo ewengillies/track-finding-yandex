@@ -503,3 +503,28 @@ def test_trig_hits_timing(cth_with_trig_hits):
             compared_once = True
     assert compared_once, "No trigger events found after removing earlier "+\
         "trigger hits, making this test meaningless."
+
+def test_trig_hits_ref(cth_with_trig_hits):
+    """
+    Ensure the correct number of hits are found
+    """
+    # Unpack the information
+    sample, file, geom, t_del, t_win = cth_with_trig_hits
+    # Get the shape of the trigger patterns
+    n_pats, l_pat = sample.trig_patterns.shape
+    # Check that it is the same as the first time we loaded in this data
+    reference_file = \
+        "{}_{}_tdel{}_twin{}_npats{}_lpat{}_trig_hits.npz".format(file, geom,
+                                                                  t_del, t_win,
+                                                                  n_pats, l_pat)
+    # Generate the reference here if needed
+    if GENERATE_REFERENCE:
+        generate_reference(reference_file,
+                           sample.data,
+                           len(sample.all_branches),
+                           N_BRANCHES[geom]+1)
+    reference_data = np.load(reference_file)["array"]
+    # Check its all the same
+    for col in sample.all_branches:
+        assert_allclose(sample.data[col], reference_data[col], err_msg=col)
+        print("PASSED : ", col)
