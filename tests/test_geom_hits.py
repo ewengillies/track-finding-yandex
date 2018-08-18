@@ -3,6 +3,7 @@ Tests for importing data from root file
 """
 from __future__ import print_function
 #import sys
+from math import floor
 from root_numpy import list_branches
 import pytest
 import numpy as np
@@ -19,10 +20,6 @@ import hits
 N_BRANCHES = {}
 N_BRANCHES["CDC"] = 36
 N_BRANCHES["CTH"] = 35
-
-a_file = "/home/five4three2/development/ICEDUST/track-finding-yandex"+\
-         "/data/MC4q/8e6_pot/bunch_train_6/root/MC4q_bkg_f5_b6_t-100_2000"
-FILES = [a_file]
 
 # CONSTRUCTOR FIXTURES #########################################################
 
@@ -371,10 +368,13 @@ def test_cth_rebin_time(cth_hits, time_bin):
 
 @pytest.fixture(params=[
     # Parametrize the array construction
-    # t_del, t_win
-    (10,  50),
-    (20,  100),
-    (100, 1000)])
+    # t_del, t_win, n_coincidence, max_offset
+    (10, 50, 2, 1),
+    (20, 100, 2, 1),
+    (100, 1000, 2, 1),
+    (100, 1000, 3, 1),
+    (10, 50, 2, 2),
+    (10, 50, 1, 0)])
 def trig_params(request):
     """
     Parametrize the trigger
@@ -389,9 +389,11 @@ def cth_with_trig_hits(cth_hits, trig_params):
     # Unpack the information
     sample, file, geom, _ = cth_hits
     # Unpack the information
-    t_del, t_win = trig_params
+    t_del, t_win, n_coin, m_off = trig_params
+    # Set the trigger pattern
+    sample.set_trigger_pattern(n_coincidence=n_coin, max_offset=m_off)
     # Set the trigger hits
-    sample.set_trigger_hits(t_win=t_win, t_del=t_del, n_proc=2)
+    sample.set_trigger_hits(t_win=t_win, t_del=t_del)
     return sample, file, geom, t_del, t_win
 
 @pytest.mark.parametrize("n_proc", [1, 4])
@@ -448,9 +450,56 @@ def test_trig_hits(cth_with_trig_hits):
         match_pat = np.sum(match_pat, axis=1) == sample.trig_patterns.shape[1]
         assert np.sum(match_pat) == 1,\
             "Volume IDs do not make up exactly one of the required patterns"
+        # Ensure all the volume ids are either in the up or down module
+        in_one_module = np.all(np.isin(vol_ids, sample.geom.up_crys)) or \
+                        np.all(np.isin(vol_ids, sample.geom.down_crys))
+        assert in_one_module, "All trigger crystals are in one station"
         # Ensure they fall within the requested time window
         time_hits = evt_trig_hits[sample.time_name]
         max_t, min_t = np.amax(time_hits), np.amin(time_hits)
-        assert (max_t - min_t) <= t_win,\
+        assert floor(max_t - min_t) <= t_win,\
             "Expected hits to fall within {} ns time window\n".format(t_win)+\
             " Max : {}\n Min : {}".format(max_t, min_t)
+
+def test_trig_hits_timing(cth_with_trig_hits):
+    """
+    Ensure the correct number of hits are found
+    """
+    # Unpack the information
+    sample, _, _, t_del, t_win = cth_with_trig_hits
+    # Iterated at least once
+    compared_once = False
+    # Iterate through, trimming off the current trigger hits to ensure that the
+    # earliest ones are always found
+    while True:
+        # Find the timing of each trigger hit
+        trig_hits = sample.data[sample.data[sample.trig_name]][sample.time_name]
+        trig_time_before = trig_hits.groupby(sample.event_index).min()
+        # Remove all the trigger hits
+        sample.trim_hits(sample.trig_name, values=False)
+        # Remove all the trigger hits
+        # Get the trigger hits again
+        sample.set_trigger_hits(t_win=t_win, t_del=t_del)
+        # Get the timing again
+        trig_hits = sample.data[sample.data[sample.trig_name]][sample.time_name]
+        trig_time_after = trig_hits.groupby(sample.event_index).min()
+        # Ensure that the same number or less trigger events are found the
+        # second time
+        n_trig_evts_before = np.unique(trig_time_before.index.values).shape[0]
+        n_trig_evts_after = np.unique(trig_time_after.index.values).shape[0]
+        if n_trig_evts_after == 0:
+            break
+        assert n_trig_evts_before >= n_trig_evts_after,\
+            "Found more trigger events after removing trigger hits!"
+        # Iterate through the trigger events the are found the second time
+        for evt in np.unique(trig_time_after.index.values):
+            # Ensure that each event finds a later trigger signal than before up
+            # to nanosecond precision
+            trig_t_before = int(trig_time_before.loc[evt])
+            trig_t_after = int(trig_time_after.loc[evt])
+            assert trig_t_before <= trig_t_after,\
+                "Trigger hits found the second time occur earlier than the "+\
+                "first time"
+            compared_once = True
+    assert compared_once, "No trigger events found after removing earlier "+\
+        "trigger hits, making this test meaningless."

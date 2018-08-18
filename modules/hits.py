@@ -899,14 +899,24 @@ class CTHHits(GeomHits):
         # Set the timing column to a
         self.sort_hits(self.time_name)
         # Return the trigger patterns
-        self.trig_patterns = self.get_trigger_pattern()
+        self.trig_patterns = None
+        self.set_trigger_pattern()
         # Set the name of the trigger column
         self.trig_name = self.prefix + trig_name
         # TODO modulo the signal timing?
 
+    def set_trigger_pattern(self, n_coincidence=2, max_offset=1):
+        """
+        Set the trigger pattern internally using the required parameters
+        """
+        # TODO documentation
+        self.trig_patterns = \
+            self.get_trigger_pattern(n_coincidence=n_coincidence,
+                                     max_offset=max_offset)
+
     def get_trigger_pattern(self, n_coincidence=2, max_offset=1):
         """
-        Set the trigger pattern, defaulting to a four fold coincidence with
+        Get the trigger pattern, defaulting to a four fold coincidence with
         a maximal offset of 1 between scintillator and cherenkov pairs
         """
         # TODO documentation
@@ -979,9 +989,9 @@ class CTHHits(GeomHits):
         trigger_hits = self.get_trigger_hits(t_win=t_win,
                                              t_del=t_del,
                                              n_proc=n_proc)
-        print(trigger_hits)
         # Set the trigger data column
-        trigger_data[trigger_hits] = True
+        if trigger_hits is not None:
+            trigger_data[trigger_hits] = True
         # Add this column to the data
         self.data[self.trig_name] = trigger_data
 
@@ -1032,8 +1042,6 @@ class CTHHits(GeomHits):
         # Skip if its empty or if its too small
         if group.shape[0] < self.trig_patterns.shape[1]:
             return None
-        # Get the time units needed
-        t_window = pd.Timedelta(nanoseconds=t_win)
         # Iterate over the ranges and get the absolute minimum time if any
         min_t_hits = (None, None)
         for t_start in np.arange(0, t_win, t_del):
@@ -1066,7 +1074,7 @@ class CTHHits(GeomHits):
         if not np.any(trig_ptrns):
             return None
         # Find the minimum time across all patterns
-        min_t_hits = (pd.Timestamp.max, None)
+        min_t_hits = (pd.Timestamp.max.to_datetime64(), None)
         hit_times = group[self.time_name].values
         hit_indexes = group[self.hit_index].values
         for pattern in self.trig_patterns[trig_ptrns, :]:
@@ -1075,7 +1083,7 @@ class CTHHits(GeomHits):
             # Find their minimum time
             min_time = np.amin(hit_times[hit_ids])
             # Set this to the return value if needed
-            if min_t_hits[0] > min_time:
+            if min_time < min_t_hits[0]:
                 min_t_hits = (min_time, hit_indexes[hit_ids])
         # Map this back to the ids of the found pattern
         return min_t_hits

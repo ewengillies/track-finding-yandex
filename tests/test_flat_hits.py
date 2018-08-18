@@ -92,7 +92,7 @@ def check_filter(filtered_hits, variable, values, greater, less, invert):
     Helper function for filter tests
     """
     # Ensure there are some events left
-    assert len(filtered_hits) != 0, "Filter has removed all hits!"+\
+    assert filtered_hits.shape[0] != 0, "Filter has removed all hits!"+\
             " This has resulted in a trivial check"
     # Ensure they pass all the filter requirements
     err = "Sample filtered on variable {} ".format(variable)
