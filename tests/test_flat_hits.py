@@ -29,7 +29,7 @@ BRANCHES = ['Track.fStartMomentum.fX',
             'MCPos.fP.fZ',
             'HitNumber']
 # Turn this on if we want to regenerate the reference sample
-GENERATE_REFERENCE = True
+GENERATE_REFERENCE = False
 # Number of branches expected for reference samples
 N_BRANCHES = {}
 N_BRANCHES["CDC"] = 34
