@@ -6,6 +6,7 @@ Notation used below:
 """
 from __future__ import print_function
 import numpy as np
+from math import ceil
 from cylinder import CDC, CTH
 from uproot_selected import import_uproot_selected, check_for_branches
 import pandas as pd
@@ -150,6 +151,7 @@ class FlatHits():
         branches = [self.prefix + b
                     if self.prefix not in b else b
                     for b in branches]
+        branches = sorted(list(set(branches)))
         # Check the branches we want are there
         check_for_branches(path, tree, branches)
         # Allow for custom selections
@@ -271,8 +273,6 @@ class FlatHits():
         Zip up the data into a rec array if this is the highest level class of
         this instance
         """
-        # Ensure the branch names are unique
-        self._branches = sorted(list(set(self._branches)))
         # Import the branches we expect
         return self._import_root_file(path, tree, branches=self._branches)
 
@@ -1009,7 +1009,7 @@ class CTHHits(GeomHits):
         grp_data[self.time_name] = \
             pd.to_datetime(grp_data[self.time_name], unit="ns")
         grp_data.reset_index(level=self.hit_index, drop=False, inplace=True)
-        grp_data = grp_data.groupby([self.event_index])
+        grp_data = grp_data.groupby(self.event_index)
         # Define a lambda function to pass in the arguments we want to use in
         # this iteration of the signal
         trig_scan = partial(self._scan_trigger_windows, t_win=t_win, t_del=t_del)
@@ -1039,25 +1039,43 @@ class CTHHits(GeomHits):
         return np.sort(np.concatenate(trig_hit_idxs))
 
     def _scan_trigger_windows(self, group, t_win=50, t_del=10):
+        # TODO documentation
         # Skip if its empty or if its too small
         if group.shape[0] < self.trig_patterns.shape[1]:
             return None
-        # Iterate over the ranges and get the absolute minimum time if any
-        min_t_hits = (None, None)
+        # Iterate over the ranges
+        all_groups = {}
+        # Change the offset of the start time for the time rebinning
         for t_start in np.arange(0, t_win, t_del):
             # Get the trigger sets in this group
-            # TODO iterate through in order of t_start
             trig_set = group.groupby(pd.Grouper(key=self.time_name,
                                                 freq=str(t_win)+"N",
                                                 base=t_start))
-            trig_set = trig_set.apply(self._find_trigger_pattern).values
-            # Iterate through the results
-            for trig in [trig for trig in trig_set if trig is not None]:
-                # Check if we have a new minimum time trigger
-                if (min_t_hits[0] is None) or (trig[0] < min_t_hits[0]):
-                    min_t_hits = trig
-        # Return the hit indexes that form the minimum
-        return min_t_hits[1]
+            # Cache them in all groups
+            for time, grp in trig_set:
+                all_groups[time] = grp
+        # Figure out how many time bins overlap
+        t_bins = ceil(float(t_win)/t_del)
+        # Iterate through all groups in order of their time bin
+        sorted_times = list(sorted(all_groups.keys()))
+        for idx, time in enumerate(sorted_times):
+            # Find any trigger patterns in this time bin
+            min_t_hits = self._find_trigger_pattern(all_groups[time])
+            # If one is found, check the next t_bins bins to make sure an
+            # earlier one does not exist
+            if min_t_hits is not None:
+                # Scroll through all bins that overlap with the time bin that
+                # has the trigger signal
+                for next_time in sorted_times[idx+1:idx+t_bins]:
+                    # Get the result from the overlapping time bin
+                    bin_res = self._find_trigger_pattern(all_groups[next_time])
+                    # If this result is earlier than the last, use it instead
+                    if (bin_res is not None) and (bin_res[0] < min_t_hits[0]):
+                        min_t_hits = bin_res
+                # Return the hits from the earliest time
+                return min_t_hits[1]
+        # Return None by default
+        return None
 
     def _find_trigger_pattern(self, group):
         # TODO document

@@ -2,9 +2,7 @@
 Tests for importing data from root file
 """
 from __future__ import print_function
-#import sys
 from math import floor
-from root_numpy import list_branches
 import pytest
 import numpy as np
 from numpy.testing import assert_allclose
@@ -12,6 +10,7 @@ from test_flat_hits import check_columns, check_data,\
                            filter_branches, generate_reference
 from test_flat_hits import FILES, NAMES, BRANCHES, GENERATE_REFERENCE
 import hits
+from uproot_selected import list_branches
 
 # Pylint settings
 # pylint: disable=redefined-outer-name
@@ -81,7 +80,7 @@ def cdc_hits(cstrct_cdc_hits_params):
     # Load all the branches
     branches = rqst_branches
     if branches == "all":
-        branches = filter_branches(list_branches(root_file, treename=tree))
+        branches = filter_branches(list_branches(root_file, tree))
     # Load the file
     sample = hits.CDCHits(root_file,
                           tree=tree,
@@ -224,7 +223,7 @@ def cth_hits(cstrct_cth_hits_params):
     # Load all the branches
     branches = rqst_branches
     if branches == "all":
-        branches = filter_branches(list_branches(root_file, treename=tree))
+        branches = filter_branches(list_branches(root_file, tree))
     # Load the file
     sample = hits.CTHHits(root_file,
                           tree=tree,

@@ -29,7 +29,7 @@ BRANCHES = ['Track.fStartMomentum.fX',
             'MCPos.fP.fZ',
             'HitNumber']
 # Turn this on if we want to regenerate the reference sample
-GENERATE_REFERENCE = False
+GENERATE_REFERENCE = True
 # Number of branches expected for reference samples
 N_BRANCHES = {}
 N_BRANCHES["CDC"] = 34
@@ -133,9 +133,7 @@ def check_fetched_events(event_data_before, event_data_after, sample):
         hit_index = _data.index.get_level_values(sample.hit_index)
         # Count the occurances and check where the occurance of each
         # event occurs
-        _, first_hit, inverse = np.unique(evt_index,
-                                          return_index=True,
-                                          return_inverse=True)
+        _, first_hit = np.unique(evt_index, return_index=True)
         # Transform this to the last occurance
         last_hit = np.roll(first_hit, -1) - 1
         # Ensure that the index of this last hit == number of hits in
@@ -465,7 +463,7 @@ def flat_hits_empty(cstrct_hits_params_empty):
                            prefix=prefix,
                            branches=branch)
     for e_branch in empty:
-        sample.data.insert(loc=len(sample.all_branches), 
+        sample.data.insert(loc=len(sample.all_branches),
                            column=e_branch,
                            value=np.zeros(sample.n_hits),
                            allow_duplicates=False)
@@ -556,7 +554,7 @@ def test_reindex_remove_event(events_and_ref_data, remove_event):
     event_data_after = sample.get_events(events)
     check_fetched_events(event_data_before, event_data_after, sample)
 
-@pytest.mark.parametrize("reindex_list",[
+@pytest.mark.parametrize("reindex_list", [
     (np.arange(25), True),
     (np.random.permutation(25), False),
     (np.arange(1000, 1025), True),
