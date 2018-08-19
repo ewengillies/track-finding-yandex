@@ -317,11 +317,12 @@ class FlatHits():
             loc_val = [loc_val]
         return self.data.loc[loc_val]
 
-    def trim_events(self, events):
+    def keep_events(self, event_index):
         """
-        Keep these events in the data
+        Keep the events given by the index in data.  Note this uses the index 
+        values, not the index value order.
         """
-        self.trim_hits(self.evt_number, values=events)
+        self.data.drop(self.evt_number, values=events)
 
     def sort_hits(self, variable=None, ascending=True, reset_index=True):
         """
@@ -360,7 +361,7 @@ class FlatHits():
                               invert=invert)
         return these_hits[mask]
 
-    def trim_hits(self, variable, values=None, greater_than=None,
+    def keep_hits_where(self, variable, values=None, greater_than=None,
                   less_than=None, invert=False):
         """
         Keep the hits satisfying this criteria
@@ -882,7 +883,7 @@ class CTHHits(GeomHits):
                                                             prefix+idx_name)
         # TODO this removes scintilator light guide hits.  Instead, gain match
         # them to the scintillator outputs
-        self.trim_hits(variable=self.flat_name, values=self.geom.fiducial_crys)
+        self.keep_hits_where(variable=self.flat_name, values=self.geom.fiducial_crys)
         # Set the timing column to a
         self.sort_hits(self.time_name)
         # Return the trigger patterns
@@ -1261,8 +1262,8 @@ class CyDetHits():
 
     def generate_event_key(self):
         # TODO documentation
-        cdc_events = cdc_hits.data.index.get_level_values(self.cdc.event_index)
-        cth_events = cth_hits.data.index.get_level_values(self.cth.event_index)
+        cdc_events = self.cdc.data.index.get_level_values(self.cdc.event_index)
+        cth_events = self.cth.data.index.get_level_values(self.cth.event_index)
         all_events = np.unique(np.concatenate([cdc_events, cth_events]))
         cdc_events_in_all = np.isin(all_events, cdc_events)
         cth_events_in_all = np.isin(all_events, cth_events)
@@ -1276,6 +1277,11 @@ class CyDetHits():
     def signal_and_background_sample(cls, sig_path, back_path, **kwargs):
         # Import the signal
         cydet_sig = cls(sig_path, **kwargs)
+        # Figure out which events to keep
+        good_trig = cydet_sig.cth.get_trigger_events(as_bool_series=True)
+        good_trck = cydet_sig.cdc.get_track_quality_events(30, 5)
+        good_events = good_trig & good_trck
+        good_events = good_events[good_events].index
         # Import the background
         cydet_back = cls(back_path, **kwargs)
 
@@ -1285,7 +1291,7 @@ class CyDetHits():
         """
         shared_evts = np.intersect1d(self.cdc.get_events()[self.cdc.evt_number],
                                      self.cth.get_events()[self.cth.evt_number])
-        self.trim_events(shared_evts)
+        self.keep_events(shared_evts)
 
     def print_branches(self):
         """
@@ -1297,19 +1303,19 @@ class CyDetHits():
         print("CDC Branches:")
         self.cdc.print_branches()
 
-    def trim_events(self, events):
+    def keep_events(self, events):
         """
         Keep these events in the data
         """
-        self.cdc.trim_events(events)
-        self.cth.trim_events(events)
+        self.cdc.keep_events(events)
+        self.cth.keep_events(events)
         self.n_events = self.cdc.n_events
 
     def apply_timing_cut(self, lower=700, upper=1170, drift=450):
         """
         Remove the hits that do not pass timing cut
         """
-        self.cth.trim_hits(variable=self.cth.time_name,\
-                           greater_than=lower, less_than=upper)
-        self.cdc.trim_hits(variable=self.cdc.time_name,\
-                           greater_than=lower, less_than=upper+drift)
+        self.cth.keep_hits_where(variable=self.cth.time_name,\
+                                 greater_than=lower, less_than=upper)
+        self.cdc.keep_hits_where(variable=self.cdc.time_name,\
+                                 greater_than=lower, less_than=upper+drift)

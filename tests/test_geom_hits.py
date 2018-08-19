@@ -506,7 +506,7 @@ def test_trig_hits_timing(cth_with_trig_hits):
         trig_hits = sample.data[sample.data[sample.trig_name]][sample.time_name]
         trig_time_before = trig_hits.groupby(sample.event_index).min()
         # Remove all the trigger hits
-        sample.trim_hits(sample.trig_name, values=False)
+        sample.keep_hits_where(sample.trig_name, values=False)
         # Remove all the trigger hits
         # Get the trigger hits again
         sample.set_trigger_hits(t_win=t_win, t_del=t_del)

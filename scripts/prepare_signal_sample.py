@@ -29,7 +29,7 @@ def import_cth_sample(cth_file, rand_t=None, min_t=500, max_t=1170):
         cth_samp.data[cth_samp.time_name] += \
                 np.vectorize(rand_t.get)(cth_samp.get_events()[cth_samp.key_name])
     # Remove the hits outside the time window
-    cth_samp.trim_hits(variable=cth_samp.time_name,
+    cth_samp.keep_hits_where(variable=cth_samp.time_name,
                        greater_than=min_t,
                        less_than=max_t)
     # Get the trigger time
@@ -45,7 +45,7 @@ def import_cdc_sample(cdc_file, rand_t=None, min_t=500, max_t=1620,
     if rand_t is not None:
         cdc_samp.data[cdc_samp.time_name] += \
                 np.vectorize(rand_t.get)(cdc_samp.get_events()[cdc_samp.key_name])
-    cdc_samp.trim_hits(variable=cdc_samp.time_name,
+    cdc_samp.keep_hits_where(variable=cdc_samp.time_name,
                        greater_than=min_t,
                        less_than=max_t)
     # Get the events that pass the cuts

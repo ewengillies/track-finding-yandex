@@ -542,7 +542,7 @@ def test_reindex_remove_event(events_and_ref_data, remove_event):
     # Remove the event from the sample
     ## hack that exploits the fact that evt_number == event_index + 1 in
     ## the test file
-    sample.trim_hits(sample.evt_number, values=remove_event+1, invert=True)
+    sample.keep_hits_where(sample.evt_number, values=remove_event+1, invert=True)
     # Ensure the data is actually different now
     assert shape_before != sample.data.shape,\
         "No events have been removed, since the shapes are the same "+\
@@ -669,7 +669,7 @@ def test_filtered_hits(flat_hits, filter_params):
                                        invert=invert)
     check_filter(filtered_hits, variable, values, greater, less, invert)
 
-def test_trim_hits(flat_hits, filter_params):
+def test_keep_hits_where(flat_hits, filter_params):
     """
     Keep the hits satisfying this criteria
     """
@@ -681,13 +681,23 @@ def test_trim_hits(flat_hits, filter_params):
     variable, values, greater, less, invert = filter_params
     variable = NAMES[geom][1] + variable
     # Get the relevant hits to keep
-    sample.trim_hits(variable,
+    sample.keep_hits_where(variable,
                      values=values,
                      greater_than=greater,
                      less_than=less,
                      invert=invert)
     check_filter(sample.data, variable, values, greater, less, invert)
 
+@pytest.mark.parametrize("index_to_keep", [0, 10, [1, 2, 3], [10, 11, 12]])
+def test_events(flat_hits, index_to_keep):
+    """
+    Keep the hits satisfying this criteria
+    """
+    # Unpack the arguments
+    sample, _, _, _ = flat_hits
+    # Build the index to keep
+    keep_index = pd.index(index_to_keep)
+    # Get the relevant hits to keep
 
 # TEST ADDING HITS##############################################################
 
@@ -706,7 +716,7 @@ def test_add_hits_by_event(flat_hits, keep_n_events):
     unique_ids = np.unique(evt_index)
     # Trim some events if we need to
     if keep_n_events is not None:
-        sample_copy.trim_hits(sample.evt_number, less_than=keep_n_events+1)
+        sample_copy.keep_hits_where(sample.evt_number, less_than=keep_n_events+1)
         unique_ids = unique_ids[:keep_n_events]
     # Set the new indexes and hence reverse the data
     sample_copy.set_event_indexes(unique_ids[::-1])
@@ -741,7 +751,7 @@ def test_add_events(flat_hits, keep_n_events):
     n_orig_events = sample_copy.n_events
     # Trim some events if we need to
     if keep_n_events is not None:
-        sample_copy.trim_hits(sample.evt_number, less_than=keep_n_events+1)
+        sample_copy.keep_hits_where(sample.evt_number, less_than=keep_n_events+1)
     # Add the hits together, adding in the reversed data
     sample.add_events(sample_copy)
     # Rigourously sort the hits in each event to compare them

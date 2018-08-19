@@ -163,7 +163,7 @@ no_bkg_hit_keys_names = \
         np.unique(train.cdc.get_measurement(train.cdc.key_name, events=no_bkg_hit_evts))
 # Remove these events
 labels = labels[no_bkg_hit_evts]
-train.trim_events(no_bkg_hit_keys_names)
+train.keep_events(no_bkg_hit_keys_names)
 
 # Initialize the arrays
 n_layers = 18

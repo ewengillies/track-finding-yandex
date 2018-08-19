@@ -125,12 +125,12 @@ def data_import_sample_no_bkg_cth(this_signal, this_background,
     if more_events == sig_hits.n_events:
         print("Trimming Signal Events")
         event_numbers = np.unique(sig_hits.cdc.get_events()[sig_hits.cdc.evt_number])[events_to_keep]
-        sig_hits.cdc.trim_events(event_numbers)
-        sig_hits.cth.trim_events(event_numbers)
+        sig_hits.cdc.keep_events(event_numbers)
+        sig_hits.cth.keep_events(event_numbers)
     else:
         print("Trimming Background Events")
         event_numbers = np.unique(back_cdc_sample.get_events()[back_cdc_sample.evt_number])[events_to_keep]
-        back_cdc_sample.trim_events(event_numbers)
+        back_cdc_sample.keep_events(event_numbers)
     print("CTH Sig Events {} ".format(sig_hits.cth.n_events))
     print("CDC Sig Events {} ".format(sig_hits.cth.n_events))
     print("CDC Back Events {} ".format(back_cdc_sample.n_events))
@@ -175,13 +175,13 @@ def data_import_sample(this_signal, this_background,
     if more_events == sig_hits.n_events:
         print("Trimming Signal Events")
         event_numbers = np.unique(sig_hits.cdc.get_events()[sig_hits.cdc.evt_number])[events_to_keep]
-        sig_hits.cdc.trim_events(event_numbers)
-        sig_hits.cth.trim_events(event_numbers)
+        sig_hits.cdc.keep_events(event_numbers)
+        sig_hits.cth.keep_events(event_numbers)
     else:
         print("Trimming Background Events")
         event_numbers = np.unique(back_hits.cdc.get_events()[back_hits.cdc.evt_number])[events_to_keep]
-        back_hits.cdc.trim_events(event_numbers)
-        back_hits.cth.trim_events(event_numbers)
+        back_hits.cdc.keep_events(event_numbers)
+        back_hits.cth.keep_events(event_numbers)
     print(("CTH Sig Events {} ".format(sig_hits.cth.n_events)))
     print(("CTH Back Events {} ".format(back_hits.cth.n_events)))
     print(("CDC Sig Events {} ".format(sig_hits.cth.n_events)))
