@@ -18,7 +18,7 @@ from uproot_selected import list_branches
 
 # Number of branches expected for reference samples
 N_BRANCHES = {}
-N_BRANCHES["CDC"] = 36
+N_BRANCHES["CDC"] = 37
 N_BRANCHES["CTH"] = 35
 
 # CONSTRUCTOR FIXTURES #########################################################
@@ -233,6 +233,36 @@ def cth_hits(cstrct_cth_hits_params):
     # Randomly assign every 5th hit as a signal hit
     sample.data.loc[::5, sample.hit_type_name] = bool(True)
     return sample, file, geom, rqst_branches
+
+def test_cth_channel_labels(cth_hits):
+    """
+    Ensure the IsLG and IsScin flags checkout against the channel assignment
+    """
+    # Unpack the parameters
+    sample, file, geom, rqst_branches = cth_hits
+    # Skip if not all branches are requested
+    if rqst_branches == "all":
+        # Get the IsSc and IsLG branches
+        cnter = sample.data[sample.prefix+"Counter"]
+        # Get the volume ID branche
+        vol_id = sample.data[sample.flat_name]
+        # Check if its upstream or downstream
+        vol_up_dn = np.isin(vol_id, sample.geom.up_crys)
+        up_dn = sample.data[sample.prefix+"Module"]
+        err = "Up/Downstream not correctly mapped"
+        assert_allclose(vol_up_dn, up_dn, err_msg=err)
+        # Check if scintillators are correctly labelled
+        vol_is_sc = np.isin(vol_id, sample.geom.scin_crys)
+        is_sc = sample.data[sample.prefix+"IsSc"]
+        err = "Scintillator labels not correctly mapped"
+        assert_allclose(vol_is_sc, is_sc, err_msg=err)
+        # Check if light guides are correctly mapped, noting that scintillator 
+        # light guide hits are ignored
+        is_lg = sample.data[sample.prefix+"IsLG"]
+        assert not np.any(is_lg & is_sc),\
+            "No scintillator light guide hits are included"
+        assert np.any(is_lg & ~is_sc),\
+            "Some cherenkov light guide hits are included"
 
 @pytest.fixture()
 def cth_hits_and_ref(cth_hits):
@@ -546,7 +576,7 @@ def test_trig_hits_getters(cth_with_trig_hits, events):
     assert_frame_equal(trig_hits_ref, trig_hits_get)
     # Test that the event indexes are the same
     ref_evt_idxs = trig_hits_ref.index.unique(level=sample.event_index)
-    trig_hits_e_idx = sample.get_trigger_evt_idxs(events=events)
+    trig_hits_e_idx = sample.get_trigger_events(events=events)
     assert_allclose(ref_evt_idxs, trig_hits_e_idx)
     # Test that the hit indexes are the same
     ref_hit_idxs = trig_hits_ref.index.get_level_values(level=sample.hit_index)

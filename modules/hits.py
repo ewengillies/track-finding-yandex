@@ -19,7 +19,6 @@ from uproot_selected import import_uproot_selected, check_for_branches
         # TODO deal with empty CTH events or empty CDC events:
         #      sparse DF with both CTH and CDC hits.
         #      * do messy version for now, just need:
-        #         * set the CTH logic to work in this
         #         * adding them to work
         #         * returning results one event at a time
 # TODO run the analysis once
@@ -86,13 +85,10 @@ def map_indexes(old_indexes, new_indexes, force_shape=True):
 class FlatHits():
     # pylint: disable=too-many-instance-attributes
     # pylint: disable=bad-continuation
-    def __init__(self,
-                 path,
-                 tree='COMETEventsSummary',
+    def __init__(self, path, tree, prefix,
                  selection=None,
                  first_event=0,
                  n_events=None,
-                 prefix="CDCHit.f",
                  branches=None,
                  hit_type_name="IsSig",
                  evt_number="EventNumber",
@@ -182,6 +178,7 @@ class FlatHits():
                                         selection=self.selection)
         e_data = e_data[self.evt_number]
         # Check the hits are sorted by event
+        e_data_sort = np.sort(e_data)
         assert np.array_equal(e_data, np.sort(e_data)),\
             "Event index named {} not sorted".format(self.evt_number)
         # Return the number of hits in each event
@@ -403,6 +400,8 @@ class FlatHits():
         # Determine which sample has more events and therefore which indexes to
         # remap, defaulting to the assumption that self.data has more events
         origin, to_add = self, hits_to_add
+        # Fix the indexes so that the addition goes smoothly.  This should be 
+        # (and is) the default
         if fix_indexes:
             if hits_to_add.n_events > self.n_events:
                 origin, to_add = self, hits_to_add
@@ -465,16 +464,11 @@ class GeomHits(FlatHits):
     # pylint: disable=bad-continuation
     # pylint: disable=relative-import
     # pylint: disable=unbalanced-tuple-unpacking
-    def __init__(self,
-                 geom,
-                 path,
-                 tree='COMETEventsSummary',
-                 prefix="CDCHit.f",
+    def __init__(self, geom, path, tree, prefix,
                  branches=None,
                  edep_name="Charge",
-                 time_name="DetectedTime",
-                 flat_name="vol_id",
-                 trig_time="TrigTime",
+                 time_name="MCPos.fE",
+                 flat_name="Channel",
                  **kwargs):
         """
         This generates hit data in a structured array from an input root file
@@ -488,8 +482,6 @@ class GeomHits(FlatHits):
         :param n_hit_name: name of branch that gives the number of hits in each
                            event
         """
-        # Name the trigger data row
-        self.trig_time = prefix + trig_time
         # Define the names of the time and energy depostition columns
         branches = _return_branches_as_list(branches)
         self.edep_name = prefix + edep_name
@@ -500,12 +492,32 @@ class GeomHits(FlatHits):
         # Get the geometry of the detector
         self.geom = geom
         # Initialize the base class
-        FlatHits.__init__(self,
-                          path,
-                          tree=tree,
-                          branches=branches,
-                          prefix=prefix,
-                          **kwargs)
+        FlatHits.__init__(self, path, tree, prefix, branches=branches, **kwargs)
+
+    def set_layer_info(self, row_name="Layer"):
+        """
+        Set the trigger time and cell ID branches
+        """
+        # TODO documentation
+        # Add the prefix
+        row_name = self.prefix + row_name
+        # Map the values from the geometry object
+        self.data[row_name] = self.geom.get_layers(self.data[self.flat_name])
+        return row_name
+
+    def set_relative_time(self, trigger_times, rel_time_name="RelativeTime"):
+        """
+        Set the relative time of the hit to the trigger signal
+        """
+        # TODO documentation, note that trigger_times needs to have an entry for 
+        # all evt_idxs in self
+        # Add the prefix
+        rel_time_name = self.prefix + rel_time_name
+        # Get the event index of each hit
+        evt_idxs = self.data.index.get_level_values(self.event_index)
+        # Calculate the relative time column
+        rel_time = self.data[self.time_name] - trigger_times.loc[evt_idxs]
+        self.data[rel_time_name] = rel_time
 
     def get_measurement(self, events, name):
         """
@@ -613,8 +625,7 @@ class GeomHits(FlatHits):
 
         :return: numpy.array of shape [CDC.n_points]
         """
-        energy_deposit = self.get_measurement(events, self.edep_name)
-        return energy_deposit
+        return self.get_measurement(events, self.edep_name)
 
     def get_hit_time(self, events):
         """
@@ -622,38 +633,17 @@ class GeomHits(FlatHits):
 
         :return: numpy.array of shape [CDC.n_points]
         """
-        time_hit = self.get_measurement(events, self.time_name)
-        return time_hit
-
-    def get_trigger_time(self, events):
-        """
-        Returns the timing of the trigger on an event
-
-        :return: numpy.array of shape [CDC.n_points]
-        """
-        # Check the trigger time has been set
-        assert "CDCHit.fTrigTime" in self.all_branches,\
-                "Trigger time has not been set yet"
-        return self.get_measurement(events, self.trig_time)
-
-    def get_relative_time(self, events):
-        """
-        Returns the difference between the start time of the hit and the time of
-        the trigger.
-        """
-        trig_time = self.get_trigger_time(events)
-        hit_time = self.get_hit_time(events)
-        return hit_time - trig_time
-
+        return self.get_measurement(events, self.time_name)
 
 class CDCHits(GeomHits):
     # pylint: disable=too-many-instance-attributes
     # pylint: disable=bad-continuation
     # pylint: disable=relative-import
-    def __init__(self,
-                 path,
-                 tree='COMETEventsSummary',
+    def __init__(self, path, 
+                 geom=CDC(),
+                 tree="CDCHitTree",
                  prefix="CDCHit.f",
+                 time_name="DetectedTime",
                  branches=None,
                  flat_name="Channel",
                  **kwargs):
@@ -673,14 +663,13 @@ class CDCHits(GeomHits):
         # Add the flat name to the branches
         branches = _return_branches_as_list(branches) + [prefix + flat_name]
         # Build the geom hits object
-        GeomHits.__init__(self,
-                          CDC(),
-                          path,
-                          tree=tree,
+        GeomHits.__init__(self, geom, path, tree, prefix,
                           branches=branches,
-                          prefix=prefix,
+                          time_name=time_name,
                           flat_name=flat_name,
                           **kwargs)
+        # Set the layer information
+        self.row_name = self.set_layer_info()
         # Sort the hits by time
         self.sort_hits(self.time_name)
 
@@ -801,32 +790,31 @@ class CDCHits(GeomHits):
         odd_hit_vector[odd_wires] = 1
         return even_hit_vector, odd_hit_vector
 
-    def min_layer_cut(self, min_layer):
+    def get_min_layer_events(self, min_layer):
         """
-        Returns the EventNumbers of the events that pass the min_layer criterium
+        Returns a boolean series of the events that pass the min_layer criterium
         """
-        # Filter for max layer
-        evt_max = np.zeros(self.n_events)
-        for event in range(self.n_events):
-            evt_hits = self.get_measurement(self.flat_name,
-                                            events=event,
-                                            flatten=False,
-                                            only_hits=False).astype(int)
-            evt_max[event] = np.amax(self.geom.point_layers[evt_hits])
-        good_event_idx = np.where(evt_max >= min_layer)
-        # TODO these should not return key name, this is dangeous for hit
-        # merging
-        return np.unique(self.get_events(events=good_event_idx)[self.evt_number])
+        # Filter for max layer, adding one since counting from zero is less 
+        # natural here
+        max_layer = self.data[self.row_name].groupby(self.event_index).max() + 1
+        return max_layer >= 5
 
-    def min_hits_cut(self, min_hits):
+
+    def get_min_hit_events(self, min_hits):
         """
-        Returns the EventNumbers of the events that pass the min_hits criterium
+        Returns a boolean series of the events that pass the min_layer criterium
         """
         # Filter for number of signal hits
-        good_events = np.where(self.event_to_n_hits >= min_hits)[0]
-        # TODO these should not return key name, this is dangeous for hit
-        # merging
-        return np.unique(self.get_events(events=good_events)[self.evt_number])
+        return self.data.groupby(self.event_index).size() > min_hits
+
+    def get_track_quality_events(self, min_hits, min_layer):
+        """
+        Returns a boolean series of the events that pass the min_layer and 
+        min_hits critereia
+        """
+        min_layer_events = self.get_min_layer_events(min_layer)
+        min_hits_events = self.get_min_hit_events(min_hits)
+        return min_layer_events & min_hits_events
 
     def get_occupancy(self):
         """
@@ -862,14 +850,13 @@ class CTHHits(GeomHits):
     # pylint: disable=too-many-instance-attributes
     # pylint: disable=bad-continuation
     # pylint: disable=relative-import
-    def __init__(self,
-                 path,
-                 tree='COMETEventsSummary',
+    def __init__(self, path,
+                 geom=CTH(),
+                 tree="CTHHitTree",
                  prefix="CTHHit.f",
-                 row_name="Channel",
+                 flat_name="VolumeID",
+                 chan_name="Channel",
                  idx_name="Counter",
-                 time_name="MCPos.fE",
-                 flat_name="vol_id",
                  trig_name="IsTrig",
                  **kwargs):
         """
@@ -886,19 +873,13 @@ class CTHHits(GeomHits):
                            event
         """
         # Add the flat name as an empty branch
-        GeomHits.__init__(self,
-                          CTH(),
-                          path,
-                          tree=tree,
-                          prefix=prefix,
+        GeomHits.__init__(self, geom, path, tree, prefix,
                           flat_name=flat_name,
-                          time_name=time_name,
                           **kwargs)
         # Define the row and idx name
-        flat_ids = self._get_geom_flat_ids(path, tree,
-                                           prefix+row_name,
-                                           prefix+idx_name)
-        self.data[self.flat_name] = flat_ids.astype(np.uint16)
+        self.data[self.flat_name] = self._get_geom_flat_ids(path, tree,
+                                                            prefix+chan_name,
+                                                            prefix+idx_name)
         # TODO this removes scintilator light guide hits.  Instead, gain match
         # them to the scintillator outputs
         self.trim_hits(variable=self.flat_name, values=self.geom.fiducial_crys)
@@ -1112,13 +1093,13 @@ class CTHHits(GeomHits):
         # Map this back to the ids of the found pattern
         return min_t_hits
 
-    def _get_geom_flat_ids(self, path, tree, row_name, idx_name):
+    def _get_geom_flat_ids(self, path, tree, chan_name, idx_name):
         """
         Labels each hit by flattened geometry ID to replace the use of volume
         row and volume index
         """
         # Import the data
-        branches = [row_name, idx_name]
+        branches = [chan_name, idx_name]
         chan_data, idx_data = \
             self._import_root_file(path, tree,
                                    branches=branches)[branches].values.T
@@ -1129,8 +1110,7 @@ class CTHHits(GeomHits):
         for row, idx, hit in zip(row_data, idx_data, list(range(self.n_hits))):
             flat_ids[hit] = self.geom.point_lookup[row, idx]
         # Save this column and name it
-        flat_id_column = flat_ids.astype(int)
-        return flat_id_column
+        return flat_ids.astype(np.uint16)
 
     def get_events(self, events=None, hodoscope="both"):
         """
@@ -1179,14 +1159,18 @@ class CTHHits(GeomHits):
         # Return the hit index of these hits
         return trig_hits.index.get_level_values(self.hit_index)
 
-    def get_trigger_evt_idxs(self, events=None):
+    def get_trigger_events(self, events=None, as_bool_series=False):
         """
-        Return the trigger events by event index number
+        Return a boolean series that has 
         """
         # Get all the trigger hits
-        trig_hits = self.get_trigger_hits(events=events)
-        # Return the hit index of these hits
-        return np.unique(trig_hits.index.get_level_values(self.event_index))
+        event_data = self.get_measurement(events, self.trig_name)
+        trig_evts = event_data.groupby(self.event_index).any()
+        # Return this if this is all that is needed
+        if as_bool_series:
+            return trig_evts
+        # Otherwise, return the event indexes
+        return trig_evts.index[trig_evts].values
 
     def get_trigger_vector(self, events):
         """
@@ -1210,24 +1194,90 @@ class CTHHits(GeomHits):
         trig_vector[evt_indexes, vol_indexes] = True
         return trig_vector
 
-class CyDetHits(FlatHits):
+class CyDetHits():
     # pylint: disable=too-many-instance-attributes
     # pylint: disable=bad-continuation
     # pylint: disable=relative-import
-    def __init__(self,
-                 cdc_hits,
-                 cth_hits,
-                 common_events=False):
+    def __init__(self, path,
+                 cdc_tree="CDCHitTree",
+                 cdc_prefix="CDCHit.f",
+                 cdc_selection=None,
+                 cdc_first_event=0,
+                 cdc_n_events=None,
+                 cdc_branches=None, 
+                 cth_tree="CTHHitTree",
+                 cth_prefix="CTHHit.f",
+                 cth_selection=None,
+                 cth_branches=None,
+                 evt_number="EventNumber",
+                 hit_number="HitNumber",
+                 **kwargs):
         """
-        A class to support overlaying hit classes of the same type.  This will
-        returned the combined event from each of the underlying hit classes.
+        FIXME
         """
-        # TODO assertion here
-        self.cth = cth_hits
+        # TODO documentation
+        # Import the CDC sample first
+        cdc_hits = CDCHits(path,
+                           tree=cdc_tree,
+                           prefix=cdc_prefix,
+                           selection=cdc_selection,
+                           first_event=cdc_first_event,
+                           n_events=cdc_n_events,
+                           branches=cdc_branches,
+                           evt_number=evt_number,
+                           hit_number=hit_number,
+                           **kwargs)
+        # Now import the CTH sample, only importing the events that are already 
+        # in the CDC sample
+        first_evt = \
+            np.amin(cdc_hits.data.index.get_level_values(cdc_hits.event_index))
+        last_evt = \
+            np.amax(cdc_hits.data.index.get_level_values(cdc_hits.event_index))
+        cth_hit_sel = "({} >= {})".format(evt_number, first_evt)
+        cth_hit_sel += " && ({} <= {})".format(evt_number, last_evt)
+        if cth_selection is None:
+            cth_selection = cth_hit_sel
+        else:
+            cth_selection += " && " + cth_hit_sel
+        # Now import the CTH hits and rebin the time
+        cth_hits = CTHHits(path,
+                           tree=cth_tree,
+                           prefix=cth_prefix,
+                           selection=cth_selection,
+                           branches=cth_branches,
+                           evt_number=evt_number,
+                           hit_number=hit_number,
+                           **kwargs)
+        # Set the members
         self.cdc = cdc_hits
-        if common_events:
-            self.keep_common_events()
-        self.n_events = min(self.cdc.n_events, self.cth.n_events)
+        self.cth = cth_hits
+        # Set the event information
+        self.event_key = self.generate_event_key()
+        # Remove the cdc coincidence
+        cdc_hits.remove_coincidence()
+        # Set the layer information
+        # Rebin the cth hits in time
+        cth_hits.rebin_time()
+
+    def generate_event_key(self):
+        # TODO documentation
+        cdc_events = cdc_hits.data.index.get_level_values(self.cdc.event_index)
+        cth_events = cth_hits.data.index.get_level_values(self.cth.event_index)
+        all_events = np.unique(np.concatenate([cdc_events, cth_events]))
+        cdc_events_in_all = np.isin(all_events, cdc_events)
+        cth_events_in_all = np.isin(all_events, cth_events)
+        event_key = pd.DataFrame({"event_index" : all_events, 
+                                  "cdc_has_evt" : cdc_events_in_all,
+                                  "cth_has_evt" : cth_events_in_all})
+        event_key.set_index("event_index", inplace=True, drop=True)
+        return event_key
+
+    @classmethod
+    def signal_and_background_sample(cls, sig_path, back_path, **kwargs):
+        # Import the signal
+        cydet_sig = cls(sig_path, **kwargs)
+        # Import the background
+        cydet_back = cls(back_path, **kwargs)
 
     def keep_common_events(self):
         """
@@ -1236,22 +1286,6 @@ class CyDetHits(FlatHits):
         shared_evts = np.intersect1d(self.cdc.get_events()[self.cdc.evt_number],
                                      self.cth.get_events()[self.cth.evt_number])
         self.trim_events(shared_evts)
-
-    def set_trigger_time(self):
-        """
-        Set the CTH trigger time for both the CTH and for all CDC hits
-        """
-        # Set the CTH trigger time
-        self.cth.set_trigger_time()
-        # Broadcase this value to all CDC hits in the event
-        for event in range(self.cth.n_events):
-            # Get all the trigger times in  this event
-            all_trig = np.unique(self.cth.get_events(event)[self.cth.trig_time])
-            # Remove the zero values
-            evt_trig = np.trim_zeros(all_trig)
-            # Broadcast this value to all CDC hits in this event
-            self.cdc.data[self.cdc.trig_time][self.cdc.event_to_hits[event]] = \
-                evt_trig
 
     def print_branches(self):
         """

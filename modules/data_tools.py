@@ -2,28 +2,13 @@ from __future__ import print_function
 from pprint import pprint
 import sys
 import numpy as np
-import scipy
 from hits import CDCHits, CTHHits, CyDetHits
 # Import from modules
 sys.path.insert(0, '../modules')
 
-def data_set_additional_branches(samp,
-                                 row_name=None,
-                                 cell_id=None,
-                                 relative_time=None):
-    """
-    Set the trigger time and cell ID branches
-    """
-    if row_name:
-        samp.data[row_name] = samp.geom.get_layers(samp.data[samp.flat_name])
-    if cell_id:
-        samp.data[cell_id] = samp.geom.get_indexes(samp.data[samp.flat_name])
-    if relative_time:
-        samp.data[relative_time] = samp.data[samp.time_name] - \
-                                   samp.data[samp.trig_name]
-
 # Dictionary of cuts to make as we import
 def data_get_cuts(needed_cuts, signal=False):
+    # TODO clean up after testing exists
     """
     Naming the cuts in a dictionary to use when importing the file
 
