@@ -322,7 +322,12 @@ class FlatHits():
         Keep the events given by the index in data.  Note this uses the index 
         values, not the index value order.
         """
-        self.data.drop(self.evt_number, values=events)
+        # Get a boolean mask of the hits to keep by event number
+        to_keep_mask = self.data.index.isin(event_index, level=self.event_index)
+        # Remove the events that arent needed
+        self.data = self.data[to_keep_mask]
+        # Reset the indexes
+        self._reset_indexes()
 
     def sort_hits(self, variable=None, ascending=True, reset_index=True):
         """

@@ -5,6 +5,7 @@ from __future__ import print_function
 from copy import deepcopy
 import pytest
 import numpy as np
+import pandas as pd
 from numpy.testing import assert_allclose
 import hits
 from hits import _is_sequence
@@ -689,15 +690,20 @@ def test_keep_hits_where(flat_hits, filter_params):
     check_filter(sample.data, variable, values, greater, less, invert)
 
 @pytest.mark.parametrize("index_to_keep", [0, 10, [1, 2, 3], [10, 11, 12]])
-def test_events(flat_hits, index_to_keep):
+def test_keep_events(flat_hits, index_to_keep):
     """
     Keep the hits satisfying this criteria
     """
     # Unpack the arguments
     sample, _, _, _ = flat_hits
     # Build the index to keep
-    keep_index = pd.index(index_to_keep)
+    if not _is_sequence(index_to_keep):
+        index_to_keep = [index_to_keep]
+    keep_index = pd.Index(index_to_keep)
     # Get the relevant hits to keep
+    sample.keep_events(keep_index)
+    # Check which hits are left
+    assert np.all(sample.data.index.isin(keep_index, level=sample.event_index))
 
 # TEST ADDING HITS##############################################################
 
