@@ -10,6 +10,7 @@ import multiprocessing as mp
 from functools import partial
 import numpy as np
 import pandas as pd
+from dask import dataframe as dd
 from cylinder import CDC, CTH
 from uproot_selected import import_uproot_selected, check_for_branches
 
@@ -367,7 +368,7 @@ class FlatHits():
         return these_hits[mask]
 
     def keep_hits_where(self, variable, values=None, greater_than=None,
-                  less_than=None, invert=False):
+                        less_than=None, invert=False):
         """
         Keep the hits satisfying this criteria
         """
@@ -888,7 +889,8 @@ class CTHHits(GeomHits):
                                                             prefix+idx_name)
         # TODO this removes scintilator light guide hits.  Instead, gain match
         # them to the scintillator outputs
-        self.keep_hits_where(variable=self.flat_name, values=self.geom.fiducial_crys)
+        self.keep_hits_where(variable=self.flat_name,
+                             values=self.geom.fiducial_crys)
         # Set the timing column to a
         self.sort_hits(self.time_name)
         # Return the trigger patterns
@@ -1002,7 +1004,6 @@ class CTHHits(GeomHits):
         grp_data[self.time_name] = \
             pd.to_datetime(grp_data[self.time_name], unit="ns")
         grp_data.reset_index(level=self.hit_index, drop=False, inplace=True)
-        grp_data = grp_data.groupby(self.event_index)
         # Define a lambda function to pass in the arguments we want to use in
         # this iteration of the signal
         trig_scan = partial(self._scan_trigger_windows, t_win=t_win, t_del=t_del)
@@ -1010,6 +1011,7 @@ class CTHHits(GeomHits):
         trig_hit_idxs = None
         # Use sequential mode if only one cpu requested
         if n_proc == 1:
+            grp_data = grp_data.groupby(self.event_index)
             trig_hit_idxs = grp_data.apply(trig_scan)
             trig_hit_idxs = trig_hit_idxs.dropna().values
             # Return None if there are no hit ids
@@ -1020,11 +1022,12 @@ class CTHHits(GeomHits):
             # Using all CPUs if n_proc is none
             if n_proc is None:
                 n_proc = mp.cpu_count()
-            # Open the pool
-            with mp.Pool(n_proc) as pool:
-                trig_hit_idxs = pool.map(trig_scan, [grp for _, grp in grp_data])
+            # Use dask now
+            grp_data = dd.from_pandas(grp_data)
             # Return the values
-            trig_hit_idxs = [item for item in trig_hit_idxs if item is not None]
+            trig_hits = grp_data.groupby(self.event_index).apply(trig_scan).compute()
+            print(trig_hits)
+            print(type(trig_hits))
             # Return None if there are none
             if not trig_hit_idxs:
                 return None
@@ -1261,7 +1264,6 @@ class CyDetHits():
         self.event_key = self.generate_event_key()
         # Remove the cdc coincidence
         cdc_hits.remove_coincidence()
-        # Set the layer information
         # Rebin the cth hits in time
         cth_hits.rebin_time()
 
@@ -1287,16 +1289,14 @@ class CyDetHits():
         good_trck = cydet_sig.cdc.get_track_quality_events(30, 5)
         good_events = good_trig & good_trck
         good_events = good_events[good_events].index
+        cydet_sig.keep_events(good_events)
         # Import the background
         cydet_back = cls(back_path, **kwargs)
+        # Add the events
 
-    def keep_common_events(self):
-        """
-        Trim all events by event index so that they have the same events
-        """
-        shared_evts = np.intersect1d(self.cdc.get_events()[self.cdc.evt_number],
-                                     self.cth.get_events()[self.cth.evt_number])
-        self.keep_events(shared_evts)
+    def add_hits(self, other_cydet):
+        # TODO documentation
+        pass
 
     def print_branches(self):
         """
@@ -1314,13 +1314,3 @@ class CyDetHits():
         """
         self.cdc.keep_events(events)
         self.cth.keep_events(events)
-        self.n_events = self.cdc.n_events
-
-    def apply_timing_cut(self, lower=700, upper=1170, drift=450):
-        """
-        Remove the hits that do not pass timing cut
-        """
-        self.cth.keep_hits_where(variable=self.cth.time_name,\
-                                 greater_than=lower, less_than=upper)
-        self.cdc.keep_hits_where(variable=self.cdc.time_name,\
-                                 greater_than=lower, less_than=upper+drift)

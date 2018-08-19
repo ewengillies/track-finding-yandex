@@ -305,7 +305,7 @@ def list_branches(path, tree=None):
     """
     List the branches availible
     """
-    # TODO 
+    # TODO docs
     # Get the names of the availible branches
     availible_branches = uproot.open(path)
     # Check if we've specified a tree, otherwise take the first tree
