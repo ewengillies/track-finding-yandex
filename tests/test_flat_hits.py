@@ -683,10 +683,10 @@ def test_keep_hits_where(flat_hits, filter_params):
     variable = NAMES[geom][1] + variable
     # Get the relevant hits to keep
     sample.keep_hits_where(variable,
-                     values=values,
-                     greater_than=greater,
-                     less_than=less,
-                     invert=invert)
+                           values=values,
+                           greater_than=greater,
+                           less_than=less,
+                           invert=invert)
     check_filter(sample.data, variable, values, greater, less, invert)
 
 @pytest.mark.parametrize("index_to_keep", [0, 10, [1, 2, 3], [10, 11, 12]])

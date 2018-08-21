@@ -10,6 +10,7 @@ import multiprocessing as mp
 from functools import partial
 import numpy as np
 import pandas as pd
+import dask
 from dask import dataframe as dd
 from cylinder import CDC, CTH
 from uproot_selected import import_uproot_selected, check_for_branches
@@ -1014,23 +1015,22 @@ class CTHHits(GeomHits):
             grp_data = grp_data.groupby(self.event_index)
             trig_hit_idxs = grp_data.apply(trig_scan)
             trig_hit_idxs = trig_hit_idxs.dropna().values
-            # Return None if there are no hit ids
-            if trig_hit_idxs.shape[0] == 0:
-                return None
         # Open up a pool of CPUs otherwise
         else:
             # Using all CPUs if n_proc is none
             if n_proc is None:
                 n_proc = mp.cpu_count()
             # Use dask now
-            grp_data = dd.from_pandas(grp_data)
+            grp_data = dd.from_pandas(grp_data, npartitions=n_proc)
             # Return the values
-            trig_hits = grp_data.groupby(self.event_index).apply(trig_scan).compute()
-            print(trig_hits)
-            print(type(trig_hits))
-            # Return None if there are none
-            if not trig_hit_idxs:
-                return None
+            with dask.config.set(num_workers=n_proc, scheduler='processes'):
+                trig_hit_idxs = grp_data.groupby(self.event_index)
+                trig_hit_idxs = trig_hit_idxs.apply(trig_scan, meta=(list))
+                trig_hit_idxs = trig_hit_idxs.compute()
+            trig_hit_idxs = trig_hit_idxs.dropna().values
+        # Return None if there are no hit ids
+        if trig_hit_idxs.shape[0] == 0:
+            return None
         # Return the correct indexes
         return np.sort(np.concatenate(trig_hit_idxs))
 
