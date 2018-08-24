@@ -5,8 +5,8 @@ from __future__ import print_function
 from copy import deepcopy
 import pytest
 import numpy as np
-import pandas as pd
 from numpy.testing import assert_allclose
+import pandas as pd
 import hits
 from hits import _is_sequence
 from uproot_selected import check_for_branches, list_branches

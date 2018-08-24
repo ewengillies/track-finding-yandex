@@ -11,6 +11,7 @@ from test_flat_hits import check_columns, check_data,\
                            filter_branches, generate_reference
 from test_flat_hits import FILES, NAMES, BRANCHES, GENERATE_REFERENCE
 import hits
+from hits import _is_sequence
 from uproot_selected import list_branches
 
 # Pylint settings
@@ -142,21 +143,39 @@ def test_cdc_sample_data(cdc_hits_and_ref):
     # Ensure all the data is the same
     check_data(sample, reference_data)
 
-@pytest.fixture(params=[
-    # var, events, shift, default, only_hits, flatten, index
-    (NAMES["CDC"][1]+BRANCHES[0], None,    None, 0, True,  False, 0), #default
-    (NAMES["CDC"][1]+BRANCHES[0], 1,       None, 0, True,  False, 1), #one evt
-    (NAMES["CDC"][1]+BRANCHES[0], [1,2,5], None, 0, True,  False, 2), #3 evt
-    (NAMES["CDC"][1]+BRANCHES[0], [1,2,5], None, 0, False, False, 3), #empty
-    (NAMES["CDC"][1]+BRANCHES[0], [1,2,5], 1,    0, False, False, 4), #pos shft
-    (NAMES["CDC"][1]+BRANCHES[0], [1,2,5], -1,   0, False, False, 5), #neg shft
-    (NAMES["CDC"][1]+BRANCHES[0], [1,2,5], None, 9, False, False, 6), #diff dft
-    (NAMES["CDC"][1]+BRANCHES[0], [1,2,5], None, 9, False, True,  7)])#flat
-def cdc_meas_params(request):
+@pytest.mark.parametrize("events", [None, 5, [1, 2],  [10, 15]])
+def test_get_hit_vector(cdc_hits, events):
     """
-    Fixture for checking get measurement functionality
+    Check if we correctly removed the coincidence
     """
-    return request.param
+    # Unpack the parameters
+    sample, file, geom, _ = cdc_hits
+    # Get the hit vector
+    hit_vector = sample.get_hit_vector(events=events)
+    # Ensure its the right shape
+    n_evts = sample.n_events
+    if events is not None and _is_sequence(events):
+        n_evts = len(events)
+    elif events is not None:
+        n_evts = 1
+    # Assert the shapes are the same
+    assert (n_evts, sample.geom.n_points) == hit_vector.shape,\
+        "Did not get the expected hit vector shape"
+    # Check that ALL the signal hits exist
+    sigs = sample.get_signal_hits(events)[sample.flat_name]
+    s_evts = hits.map_indexes(sigs.index.get_level_values(sample.event_index),
+                              np.arange(n_evts))
+    assert_allclose(hit_vector[s_evts, sigs.values], np.ones_like(s_evts))
+    # Check that all background hits exist except those that are also in the
+    # signal
+    back = sample.get_background_hits(events)[sample.flat_name]
+    b_evts = hits.map_indexes(back.index.get_level_values(sample.event_index),
+                              np.arange(n_evts))
+    back_vect = hit_vector[b_evts, back.values]
+    n_back = np.sum(back_vect == 2)
+    n_sig = np.sum(back_vect == 1)
+    assert n_back > n_sig, "Found more background than coincident signal"
+    assert n_back + n_sig == back_vect.shape[0], "Only signal or background found"
 
 def test_remove_coincidence(cdc_hits):
     """
@@ -181,6 +200,22 @@ def test_remove_coincidence(cdc_hits):
     for col in sample.all_branches:
         assert_allclose(sample_data[col], ref_data[col], err_msg=col)
         print("PASSED : ", col)
+
+@pytest.fixture(params=[
+    # var, events, shift, default, only_hits, flatten, index
+    (NAMES["CDC"][1]+BRANCHES[0], None,    None, 0, True,  False, 0), #default
+    (NAMES["CDC"][1]+BRANCHES[0], 1,       None, 0, True,  False, 1), #one evt
+    (NAMES["CDC"][1]+BRANCHES[0], [1,2,5], None, 0, True,  False, 2), #3 evt
+    (NAMES["CDC"][1]+BRANCHES[0], [1,2,5], None, 0, False, False, 3), #empty
+    (NAMES["CDC"][1]+BRANCHES[0], [1,2,5], 1,    0, False, False, 4), #pos shft
+    (NAMES["CDC"][1]+BRANCHES[0], [1,2,5], -1,   0, False, False, 5), #neg shft
+    (NAMES["CDC"][1]+BRANCHES[0], [1,2,5], None, 9, False, False, 6), #diff dft
+    (NAMES["CDC"][1]+BRANCHES[0], [1,2,5], None, 9, False, True,  7)])#flat
+def cdc_meas_params(request):
+    """
+    Fixture for checking get measurement functionality
+    """
+    return request.param
 
 def test_get_measurement(cdc_hits, cdc_meas_params):
     """
@@ -256,7 +291,7 @@ def test_cth_channel_labels(cth_hits):
         is_sc = sample.data[sample.prefix+"IsSc"]
         err = "Scintillator labels not correctly mapped"
         assert_allclose(vol_is_sc, is_sc, err_msg=err)
-        # Check if light guides are correctly mapped, noting that scintillator 
+        # Check if light guides are correctly mapped, noting that scintillator
         # light guide hits are ignored
         is_lg = sample.data[sample.prefix+"IsLG"]
         assert not np.any(is_lg & is_sc),\

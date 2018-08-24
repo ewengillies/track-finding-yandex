@@ -538,96 +538,39 @@ class GeomHits(FlatHits):
         # Select the relevant event from data
         return self.get_events(events)[name]
 
-    def get_hit_vols(self, events, unique=True, hit_type="both"):
-        """
-        Returns the sequence of flat_ids that register hits in given event
-
-        :return: numpy array of hit wires
-        :param: hit_type defines which hit volumes should be retrieved.
-                Possible valuses are both, signal, and background
-        """
-        # Select the relevant event from data
-        hit_type = hit_type.lower()
-        assert hit_type.startswith("both") or\
-               hit_type.startswith("sig") or\
-               hit_type.startswith("back"),\
-               "Hit type "+ hit_type+ " selected.  This must be both, signal,"+\
-               " or background"
-        if hit_type == "both":
-            flat_ids = self.get_events(events)[self.flat_name]
-        elif hit_type.startswith("sig"):
-            flat_ids = self.get_signal_hits(events)[self.flat_name]
-        elif hit_type.startswith("back"):
-            flat_ids = self.get_background_hits(events)[self.flat_name]
-        if unique is True:
-            flat_ids = np.unique(flat_ids)
-        return flat_ids
-
-    def get_sig_vols(self, events, unique=True):
-        """
-        Returns the sequence of flat_ids that register signal hits in given
-        event
-
-        :return: numpy array of hit wires
-        """
-        # Select the relevant event from data
-        return self.get_hit_vols(events, unique, hit_type="sig")
-
-    def get_bkg_vols(self, events, unique=True):
-        """
-        Returns the sequence of flat_ids that register hits in given event
-
-        :return: numpy array of hit wires
-        """
-        # Select the relevant event from data
-        return self.get_hit_vols(events, unique, hit_type="back")
-
-    def get_hit_vector(self, events):
-        """
-        Returns a vector denoting whether or not a wire has a hit on it. Returns
-        1 for a hit, 0 for no hit
-
-        :return: numpy array of shape [n_wires] whose value is 1 for a hit, 0
-                 for no hit
-        """
-        # Get the flat vol IDs for those with hits
-        hit_vols = self.get_hit_vols(events, unique=True)
-        # Make the hit vector
-        hit_vector = np.zeros(self.geom.n_points)
-        hit_vector[hit_vols] = 1
-        return hit_vector
-
-    def get_vol_types(self, events):
+    def get_hit_vector(self, events=None):
         """
         Get hits in all volumes by type, 1 is signal, 2 in background, nothing
         is 0. Signal takes priority.
 
-        :return: numpy.array of shape [Geometry.n_points]
+        :return: numpy.array of shape [n_events, Geometry.n_points]
         """
+        # TODO documentation
+        # Check if events is none
+        if events is None:
+            events = np.arange(self.n_events)
+        # Allow for a single event
+        if not _is_sequence(events):
+            events = [events]
+        # Count how many events there are
+        n_events = len(events)
         # Get the flat vol IDs for those vols with sig or bkg hits
-        bkg_vols = self.get_bkg_vols(events, unique=True)
-        sig_vols = self.get_sig_vols(events, unique=True)
-        # Make the hit vector
-        hit_vector = np.zeros(self.geom.n_points)
-        hit_vector[bkg_vols] = 2
-        hit_vector[sig_vols] = 1
-        return hit_vector
-
-    def get_hit_types(self, events):
-        """
-        Returns all hit types, where signal is 1, background is 2,
-        nothing is 0.
-
-        :return: numpy.array of shape [CDC.n_points]
-        """
-        result = np.zeros(self.n_hits, dtype=int)
-        # Get the background hits
-        bkg_hits = self.get_background_hits(events)[self.hit_index]
-        result[bkg_hits] = 2
-        # Get the signal hits
-        sig_hits = self.get_signal_hits(events)[self.hit_index]
-        result[sig_hits] = 1
-        return result.astype(int)
+        vols = self.get_events(events)[[self.flat_name, self.hit_type_name]]
+        # Sort to ensure the signal hits come last
+        vols.sort_values([self.event_index,
+                          self.flat_name,
+                          self.hit_type_name],
+                          ascending=True,
+                          inplace=True)
+        # Initialize the return values
+        vol_vect = np.zeros((n_events, self.geom.n_points), dtype=np.uint8)
+        # Get the event and volume indexes to map the result
+        vol_idxs = vols[self.flat_name].values
+        evt_idxs = vols.index.get_level_values(self.event_index)
+        evt_idxs = map_indexes(evt_idxs, np.arange(n_events))
+        # Mark the ones with a hit by the hit type
+        vol_vect[evt_idxs, vol_idxs] = np.take([2, 1], vols[self.hit_type_name])
+        return vol_vect
 
     def get_energy_deposits(self, events):
         """
@@ -754,52 +697,6 @@ class CDCHits(GeomHits):
             return result.tocsr()
         return result
 
-    def get_hit_types(self, events, unique=True):
-        """
-        Returns hit type in all volumes, where signal is 1, background is 2,
-        nothing is 0.  If signal and background are both incident, signal takes
-        priority
-
-        :return: numpy.array of shape [CDC.n_points]
-        """
-        result = np.zeros(self.geom.n_points, dtype=int)
-        # Get the background hits
-        bkg_hits = np.unique(self.get_background_hits(events)[self.flat_name])
-        result[bkg_hits] = 2
-        # Get the signal hits
-        sig_hits = np.unique(self.get_signal_hits(events)[self.flat_name])
-        result[sig_hits] = 1
-        return result.astype(int)
-
-    def get_hit_wires_even_odd(self, events):
-        """
-        Returns two sequences of wire_ids that register hits in given event, the
-        first is only in even layers, the second is only in odd layers
-
-        :return: numpy array of hit wires
-        """
-        hit_wires = self.get_hit_vols(events)
-        odd_wires = np.where((self.geom.point_pol == 1))[0]
-        even_hit_wires = np.setdiff1d(hit_wires, odd_wires, assume_unique=True)
-        odd_hit_wires = np.intersect1d(hit_wires, odd_wires, assume_unique=True)
-        return even_hit_wires, odd_hit_wires
-
-    def get_hit_vector_even_odd(self, events):
-        """
-        Returns a vector denoting whether or not a wire on an odd layer has a
-        hit on it. Returns 1 for a hit in an odd layer, 0 for no hit and all
-        even layers
-
-        :return: numpy array of shape [n_wires] whose value is 1 for a hit on an
-                odd layer, 0 otherwise
-        """
-        even_wires, odd_wires = self.get_hit_wires_even_odd(events)
-        even_hit_vector = np.zeros(self.geom.n_points)
-        even_hit_vector[even_wires] = 1
-        odd_hit_vector = np.zeros(self.geom.n_points)
-        odd_hit_vector[odd_wires] = 1
-        return even_hit_vector, odd_hit_vector
-
     def get_min_layer_events(self, min_layer):
         """
         Returns a boolean series of the events that pass the min_layer criterium
@@ -834,15 +731,20 @@ class CDCHits(GeomHits):
         :return: np.array (3, self.n_events) as
             (signal_occupauncy, background_occupancy, total_occupancy)
         """
+        # Initialize the return value
         occ = np.zeros((3, self.n_events))
-        for evt in range(self.n_events):
-            occ[0, evt] = len(self.get_sig_vols(evt))
-            occ[1, evt] = len(self.get_bkg_vols(evt))
-            occ[2, evt] = len(self.get_hit_vols(evt))
+        # Get the hit volumes
+        hit_vector = self.get_hit_vector()
+        # Get the occupancy of each
+        occ[0, :] = np.sum(hit_vector == 1, axis=1)
+        occ[1, :] = np.sum(hit_vector == 2, axis=1)
+        occ[2, :] = np.sum(hit_vector == 0, axis=1)
 
         # print some information
-        avg_n_hits, err_n_hits = np.average(self.event_to_n_hits), \
-                           np.std(self.event_to_n_hits)/np.sqrt(self.n_events)
+        evt_index = self.data.index.get_level_values(self.event_index).values
+        _, event_to_n_hits = np.unique(evt_index, return_counts=True)
+        avg_n_hits, err_n_hits = np.average(event_to_n_hits), \
+                           np.std(event_to_n_hits)/np.sqrt(self.n_events)
         sig_occ, sig_err = np.average(occ[0, :]), \
                            np.std(occ[0, :])/np.sqrt(self.n_events)
         back_occ, back_err = np.average(occ[1, :]), \
@@ -1183,7 +1085,7 @@ class CTHHits(GeomHits):
         # Otherwise, return the event indexes
         return trig_evts.index[trig_evts].values
 
-    def get_trigger_vector(self, events):
+    def get_trigger_vector(self, events=None):
         """
         Return the shape [events, self.geom.n_points], where 1 is a triggered
         volume
@@ -1222,6 +1124,7 @@ class CyDetHits():
                  cth_branches=None,
                  evt_number="EventNumber",
                  hit_number="HitNumber",
+                 remove_coincidence=True,
                  **kwargs):
         """
         FIXME
@@ -1262,10 +1165,12 @@ class CyDetHits():
         # Set the members
         self.cdc = cdc_hits
         self.cth = cth_hits
-        # Remove the cdc coincidence
-        cdc_hits.remove_coincidence()
-        # Rebin the cth hits in time
-        cth_hits.rebin_time()
+        # Check if coincidence should be delt with
+        if remove_coincidence:
+            # Remove the cdc coincidence
+            cdc_hits.remove_coincidence()
+            # Rebin the cth hits in time
+            cth_hits.rebin_time()
         # Set the event information
         self.event_key = None
         self.reset_event_key()
