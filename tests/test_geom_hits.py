@@ -92,6 +92,44 @@ def cdc_hits(cstrct_cdc_hits_params):
     sample.data.loc[::5, sample.hit_type_name] = bool(True)
     return sample, file, geom, rqst_branches
 
+@pytest.fixture(params=[
+    # min_time, max_time, drift_time
+    (100., None, None),
+    (None, 1000., None),
+    (None, None, 500.),
+    (100., 1000., 500.)])
+def cdc_time_selections(request):
+    """
+    Parameterize the time selection in the CDC
+    """
+    return request.param
+
+@pytest.fixture()
+def cdc_hits_time_sel(cstrct_cdc_hits_params, cdc_time_selections):
+    """
+    Construct the base cdc hits object
+    """
+    # Unpack the parameters
+    file, geom, rqst_branches = cstrct_cdc_hits_params
+    min_time, max_time, drift_time = cdc_time_selections
+    tree, prefix = NAMES[geom]
+    root_file = file + ".root"
+    # Load all the branches
+    branches = rqst_branches
+    if branches == "all":
+        branches = filter_branches(list_branches(root_file, tree))
+    # Load the file
+    sample = hits.CDCHits(root_file,
+                          tree=tree,
+                          prefix=prefix,
+                          branches=branches,
+                          min_time=min_time,
+                          max_time=max_time,
+                          drift_time=drift_time)
+    # Randomly assign every 5th hit as a signal hit
+    sample.data.loc[::5, sample.hit_type_name] = bool(True)
+    return sample, min_time, max_time, drift_time
+
 @pytest.fixture()
 def cdc_hits_and_ref(cdc_hits):
     """
@@ -142,6 +180,27 @@ def test_cdc_sample_data(cdc_hits_and_ref):
     sample, reference_data, _ = cdc_hits_and_ref
     # Ensure all the data is the same
     check_data(sample, reference_data)
+
+def test_time_selection(cdc_hits_time_sel):
+    """
+    Test the time selection at construction. This implicitly tests GeomHits,
+    hence CTH hits as well.
+    """
+    # Unpack the values
+    sample, min_time, max_time, drift_time = cdc_hits_time_sel
+    # Check the minimum time
+    time_vals = sample.data[sample.time_name]
+    if min_time is not None:
+        err_msg = "Minimum time not respected!"
+        assert np.all(time_vals >= min_time), err_msg
+    if max_time is not None:
+        if drift_time is None:
+            err_msg = "Maxmimum time not respected!"
+            assert np.all(time_vals <= max_time), err_msg
+        else:
+            err_msg = "Maximum time with drift time not respected!"
+            assert np.any(time_vals >= max_time), err_msg
+            assert np.all(time_vals <= max_time + drift_time), err_msg
 
 @pytest.mark.parametrize("events", [None, 5, [1, 2],  [10, 15]])
 def test_get_hit_vector(cdc_hits, events):

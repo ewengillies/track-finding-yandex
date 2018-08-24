@@ -11,6 +11,7 @@ from functools import partial
 import numpy as np
 import pandas as pd
 import dask
+import tabulate
 from dask import dataframe as dd
 from cylinder import CDC, CTH
 from uproot_selected import import_uproot_selected, check_for_branches
@@ -479,6 +480,9 @@ class GeomHits(FlatHits):
                  edep_name="Charge",
                  time_name="MCPos.fE",
                  flat_name="Channel",
+                 selection=None,
+                 min_time=None,
+                 max_time=None,
                  **kwargs):
         """
         This generates hit data in a structured array from an input root file
@@ -497,12 +501,24 @@ class GeomHits(FlatHits):
         self.edep_name = prefix + edep_name
         self.time_name = prefix + time_name
         branches += [self.edep_name, self.time_name]
+        # Check if there are any cuts on time
+        for time_val, oper in zip([min_time, max_time],
+                                  [">=", "<="]):
+            if time_val is not None:
+                time_cut = "{} {} {}".format(self.time_name, oper, time_val)
+                if selection is not None: 
+                    selection += " && " + time_cut
+                else:
+                    selection = time_cut
         # Define the flattened indexes of the geometry
         self.flat_name = prefix + flat_name
         # Get the geometry of the detector
         self.geom = geom
         # Initialize the base class
-        FlatHits.__init__(self, path, tree, prefix, branches=branches, **kwargs)
+        FlatHits.__init__(self, path, tree, prefix,
+                          selection=selection,
+                          branches=branches, 
+                          **kwargs)
 
     def set_layer_info(self, row_name="Layer"):
         """
@@ -538,7 +554,7 @@ class GeomHits(FlatHits):
         # Select the relevant event from data
         return self.get_events(events)[name]
 
-    def get_hit_vector(self, events=None):
+    def get_hit_vector(self, events=None, only_back=False):
         """
         Get hits in all volumes by type, 1 is signal, 2 in background, nothing
         is 0. Signal takes priority.
@@ -599,6 +615,8 @@ class CDCHits(GeomHits):
                  time_name="DetectedTime",
                  branches=None,
                  flat_name="Channel",
+                 max_time=None,
+                 drift_time=450.,
                  **kwargs):
         """
         This generates hit data in a structured array from an input root file
@@ -615,11 +633,14 @@ class CDCHits(GeomHits):
         """
         # Add the flat name to the branches
         branches = _return_branches_as_list(branches) + [prefix + flat_name]
+        if (drift_time is not None) and (max_time is not None):
+            max_time += drift_time
         # Build the geom hits object
         GeomHits.__init__(self, geom, path, tree, prefix,
                           branches=branches,
                           time_name=time_name,
                           flat_name=flat_name,
+                          max_time=max_time,
                           **kwargs)
         # Set the layer information
         self.row_name = self.set_layer_info()
@@ -738,25 +759,33 @@ class CDCHits(GeomHits):
         # Get the occupancy of each
         occ[0, :] = np.sum(hit_vector == 1, axis=1)
         occ[1, :] = np.sum(hit_vector == 2, axis=1)
-        occ[2, :] = np.sum(hit_vector == 0, axis=1)
-
-        # print some information
-        evt_index = self.data.index.get_level_values(self.event_index).values
-        _, event_to_n_hits = np.unique(evt_index, return_counts=True)
-        avg_n_hits, err_n_hits = np.average(event_to_n_hits), \
-                           np.std(event_to_n_hits)/np.sqrt(self.n_events)
-        sig_occ, sig_err = np.average(occ[0, :]), \
-                           np.std(occ[0, :])/np.sqrt(self.n_events)
-        back_occ, back_err = np.average(occ[1, :]), \
-                           np.std(occ[1, :])/np.sqrt(self.n_events)
-        all_occ, all_err = np.average(occ[2, :]), \
-                           np.std(occ[2, :])/np.sqrt(self.n_events)
-        print("Sig Occ: {} {}".format(sig_occ, sig_err))
-        print("Back Occ: {} {}".format(back_occ, back_err))
-        print("All Occ: {} {}".format(all_occ, all_err))
-        print("NumHits: {} {}".format(avg_n_hits, err_n_hits))
-        print("MinMultiHit: {}".format((avg_n_hits - all_occ)/float(all_occ)))
+        occ[2, :] = np.sum(hit_vector != 0, axis=1)
         return occ
+
+    def print_occupancy(self, occ, verbose=False):
+        """
+        FIXME
+        """
+        #TODO documentation
+        # Count the number of hits
+        evt_index = self.data.index.get_level_values(self.event_index).values
+        _, e_n_hits = np.unique(evt_index, return_counts=True)
+        # Print the occupancy values
+        names = ["n_signal","n_signal_stdev", 
+                 "n_background", "n_background_stdev",
+                 "n_all", "n_all_stdev",
+                 "n_hits", "n_hits_stdev",
+                 "n_events_cdc"]
+        occ_list = []
+        for hits in occ:
+            occ_list += [np.average(hits), np.std(hits)]
+        # Print the average number of hits
+        occ_list += [np.average(e_n_hits), np.std(e_n_hits)]
+        # Print the number of events
+        occ_list += [self.n_events]
+        if verbose:
+            print(tabulate.tabulate(zip(names, occ_list)))
+        return names, occ_list
 
 class CTHHits(GeomHits):
     # pylint: disable=too-many-instance-attributes
@@ -1074,7 +1103,7 @@ class CTHHits(GeomHits):
 
     def get_trigger_events(self, events=None, as_bool_series=False):
         """
-        Return a boolean series that has
+        FIXME
         """
         # Get all the trigger hits
         event_data = self.get_measurement(events, self.trig_name)
@@ -1118,10 +1147,15 @@ class CyDetHits():
                  cdc_first_event=0,
                  cdc_n_events=None,
                  cdc_branches=None,
+                 cdc_min_time=None,
+                 cdc_max_time=None,
+                 cdc_drift_time=None,
                  cth_tree="CTHHitTree",
                  cth_prefix="CTHHit.f",
                  cth_selection=None,
                  cth_branches=None,
+                 cth_min_time=None,
+                 cth_max_time=None,
                  evt_number="EventNumber",
                  hit_number="HitNumber",
                  remove_coincidence=True,
@@ -1174,6 +1208,10 @@ class CyDetHits():
         # Set the event information
         self.event_key = None
         self.reset_event_key()
+    
+    @property
+    def n_events(self):
+        return self.event_key.shape[0]
 
     def reset_event_key(self):
         # TODO documentation
