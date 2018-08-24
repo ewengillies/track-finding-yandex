@@ -302,7 +302,7 @@ class FlatHits():
             mask = np.logical_not(mask)
         return mask
 
-    def get_events(self, events=None):
+    def get_events(self, events=None, map_index=True):
         """
         Returns the hits from the given event(s).  Default gets all events
 
@@ -312,8 +312,10 @@ class FlatHits():
         if events is None:
             return self.data
         # Return all events by default
-        loc_lvl = self.data.index.names.index(self.event_index)
-        loc_val = self.data.index.levels[loc_lvl][events]
+        loc_val = events
+        if map_index:
+            loc_lvl = self.data.index.names.index(self.event_index)
+            loc_val = self.data.index.levels[loc_lvl][loc_val]
         # Ensure its still a sequence so a multiindex data frame is returned
         if not _is_sequence(loc_val):
             loc_val = [loc_val]
@@ -321,7 +323,7 @@ class FlatHits():
 
     def keep_events(self, event_index):
         """
-        Keep the events given by the index in data.  Note this uses the index 
+        Keep the events given by the index in data.  Note this uses the index
         values, not the index value order.
         """
         # Get a boolean mask of the hits to keep by event number
@@ -408,7 +410,7 @@ class FlatHits():
         # Determine which sample has more events and therefore which indexes to
         # remap, defaulting to the assumption that self.data has more events
         origin, to_add = self, hits_to_add
-        # Fix the indexes so that the addition goes smoothly.  This should be 
+        # Fix the indexes so that the addition goes smoothly.  This should be
         # (and is) the default
         if fix_indexes:
             if hits_to_add.n_events > self.n_events:
@@ -517,7 +519,7 @@ class GeomHits(FlatHits):
         """
         Set the relative time of the hit to the trigger signal
         """
-        # TODO documentation, note that trigger_times needs to have an entry for 
+        # TODO documentation, note that trigger_times needs to have an entry for
         # all evt_idxs in self
         # Add the prefix
         rel_time_name = self.prefix + rel_time_name
@@ -647,7 +649,7 @@ class CDCHits(GeomHits):
     # pylint: disable=too-many-instance-attributes
     # pylint: disable=bad-continuation
     # pylint: disable=relative-import
-    def __init__(self, path, 
+    def __init__(self, path,
                  geom=CDC(),
                  tree="CDCHitTree",
                  prefix="CDCHit.f",
@@ -802,7 +804,7 @@ class CDCHits(GeomHits):
         """
         Returns a boolean series of the events that pass the min_layer criterium
         """
-        # Filter for max layer, adding one since counting from zero is less 
+        # Filter for max layer, adding one since counting from zero is less
         # natural here
         max_layer = self.data[self.row_name].groupby(self.event_index).max() + 1
         return max_layer >= 5
@@ -817,7 +819,7 @@ class CDCHits(GeomHits):
 
     def get_track_quality_events(self, min_hits, min_layer):
         """
-        Returns a boolean series of the events that pass the min_layer and 
+        Returns a boolean series of the events that pass the min_layer and
         min_hits critereia
         """
         min_layer_events = self.get_min_layer_events(min_layer)
@@ -1170,7 +1172,7 @@ class CTHHits(GeomHits):
 
     def get_trigger_events(self, events=None, as_bool_series=False):
         """
-        Return a boolean series that has 
+        Return a boolean series that has
         """
         # Get all the trigger hits
         event_data = self.get_measurement(events, self.trig_name)
@@ -1213,7 +1215,7 @@ class CyDetHits():
                  cdc_selection=None,
                  cdc_first_event=0,
                  cdc_n_events=None,
-                 cdc_branches=None, 
+                 cdc_branches=None,
                  cth_tree="CTHHitTree",
                  cth_prefix="CTHHit.f",
                  cth_selection=None,
@@ -1236,14 +1238,14 @@ class CyDetHits():
                            evt_number=evt_number,
                            hit_number=hit_number,
                            **kwargs)
-        # Now import the CTH sample, only importing the events that are already 
+        # Now import the CTH sample, only importing the events that are already
         # in the CDC sample
-        first_evt = \
-            np.amin(cdc_hits.data.index.get_level_values(cdc_hits.event_index))
-        last_evt = \
-            np.amax(cdc_hits.data.index.get_level_values(cdc_hits.event_index))
-        cth_hit_sel = "({} >= {})".format(evt_number, first_evt)
-        cth_hit_sel += " && ({} <= {})".format(evt_number, last_evt)
+        e_idx_vals = cdc_hits.data.index.get_level_values(cdc_hits.event_index)
+        e_idx_vals = e_idx_vals.values
+        first_evt = np.amin(e_idx_vals)
+        last_evt = np.amax(e_idx_vals)
+        cth_hit_sel = "({} >= {})".format(cth_prefix+evt_number, first_evt)
+        cth_hit_sel += " && ({} <= {})".format(cth_prefix+evt_number, last_evt)
         if cth_selection is None:
             cth_selection = cth_hit_sel
         else:
@@ -1260,43 +1262,94 @@ class CyDetHits():
         # Set the members
         self.cdc = cdc_hits
         self.cth = cth_hits
-        # Set the event information
-        self.event_key = self.generate_event_key()
         # Remove the cdc coincidence
         cdc_hits.remove_coincidence()
         # Rebin the cth hits in time
         cth_hits.rebin_time()
+        # Set the event information
+        self.event_key = None
+        self.reset_event_key()
 
-    def generate_event_key(self):
+    def reset_event_key(self):
+        # TODO documentation
+        self.event_key = self._generate_event_key()
+
+    def _generate_event_key(self):
         # TODO documentation
         cdc_events = self.cdc.data.index.get_level_values(self.cdc.event_index)
         cth_events = self.cth.data.index.get_level_values(self.cth.event_index)
         all_events = np.unique(np.concatenate([cdc_events, cth_events]))
-        cdc_events_in_all = np.isin(all_events, cdc_events)
-        cth_events_in_all = np.isin(all_events, cth_events)
-        event_key = pd.DataFrame({"event_index" : all_events, 
-                                  "cdc_has_evt" : cdc_events_in_all,
-                                  "cth_has_evt" : cth_events_in_all})
+        cdc_events = np.isin(all_events, cdc_events)
+        cth_events = np.isin(all_events, cth_events)
+        event_key = pd.DataFrame({"event_index" : all_events,
+                                  "cdc_has_evt" : cdc_events,
+                                  "cth_has_evt" : cth_events})
         event_key.set_index("event_index", inplace=True, drop=True)
         return event_key
 
     @classmethod
-    def signal_and_background_sample(cls, sig_path, back_path, **kwargs):
+    def signal_and_background_sample(cls, sig_path, back_path,
+                                     n_proc=None, shuffle_seed=None,
+                                     reset_trig=False,
+                                     **kwargs):
         # Import the signal
-        cydet_sig = cls(sig_path, **kwargs)
+        sig = cls(sig_path, **kwargs)
+        # Find and set the trigger hits
+        sig.cth.set_trigger_hits(n_proc=n_proc)
         # Figure out which events to keep
-        good_trig = cydet_sig.cth.get_trigger_events(as_bool_series=True)
-        good_trck = cydet_sig.cdc.get_track_quality_events(30, 5)
+        good_trig = sig.cth.get_trigger_events(as_bool_series=True)
+        good_trck = sig.cdc.get_track_quality_events(30, 5)
         good_events = good_trig & good_trck
         good_events = good_events[good_events].index
-        cydet_sig.keep_events(good_events)
-        # Import the background
-        cydet_back = cls(back_path, **kwargs)
-        # Add the events
+        sig.keep_events(good_events)
+        # Import the background and add it to the signal
+        sig.add_hits(cls(back_path, **kwargs), shuffle_seed=shuffle_seed)
+        # Check if the trigger will be reset
+        if reset_trig:
+            sig.cth.set_trigger_hits(n_proc=n_proc)
+        # Get the the trigger timing
+        sig.set_relative_time()
+        return sig
 
-    def add_hits(self, other_cydet):
+    def set_relative_time(self):
         # TODO documentation
-        pass
+        # Get the series of trigger times as an NaN series
+        trigger_times = pd.Series(data=np.fill(self.event_key.shape[0], np.nan),
+                                  index=self.event_key.index)
+        # Get the trigger times for each event
+        cth_trigs = self.cth.get_trigger_time()
+        trigger_times[cth_trigs.index] = cth_trigs.values
+        # Set the relative time for the CDC events
+        self.cdc.set_relative_time(trigger_times)
+
+    def add_hits(self, add, trim_self=True, shuffle_seed=None):
+        # TODO documentation
+        # Complain if there are not enough events
+        n_self = self.event_key.shape[0]
+        n_add = add.event_key.shape[0]
+        if n_self < n_add:
+            err_msg = "Not enough events in sample to add new sample.\n"+\
+                      "Number of in self {}\n".format(n_self)+\
+                      "Number of to add {}".format(n_add)
+            raise ValueError(err_msg)
+        # Remove the unneeded self events
+        self_to_keep = self.event_key.index.values[:n_add]
+        self.keep_events(self_to_keep)
+        # Map the keys on to eachother
+        new_key = map_indexes(add.event_key.index.values,
+                              self.event_key.index.values)
+        # Loop over the samples
+        for geom, mask in zip([add.cdc, add.cth],
+                              [add.event_key.cdc_has_evt,
+                               add.event_key.cth_has_evt]):
+            # Reset the indexes to these new indexes
+            geom.set_event_indexes(evts_index=new_key[mask])
+        # Reset the event key for the mapped sample
+        add.reset_event_key()
+        # Add in the sample, reset the event key, and return the object
+        self.cdc.add_hits(add.cdc, fix_indexes=False)
+        self.cth.add_hits(add.cth, fix_indexes=False)
+        self.reset_event_key()
 
     def print_branches(self):
         """
@@ -1314,3 +1367,4 @@ class CyDetHits():
         """
         self.cdc.keep_events(events)
         self.cth.keep_events(events)
+        self.event_key = self._generate_event_key()
