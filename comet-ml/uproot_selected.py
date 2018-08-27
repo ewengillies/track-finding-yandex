@@ -265,9 +265,9 @@ def import_uproot_selected(path,
                                   outputtype=pd.DataFrame,
                                   entrysteps=num_entries):
             # Format the data block
-            data = format_data(data, branches,
-                               selection=selection,
-                               single_perc=single_perc)
+            d_blk = format_data(d_blk, branches,
+                                selection=selection,
+                                single_perc=single_perc)
             # Add this data to our import
             data += [d_blk]
         # Concatenate the data

@@ -95,7 +95,8 @@ class FlatHits():
                  branches=None,
                  hit_type_name="IsSig",
                  evt_number="EventNumber",
-                 hit_number="HitNumber"):
+                 hit_number="HitNumber",
+                 num_entries=None):
         # TODO fill in docs
         """
         """
@@ -112,6 +113,9 @@ class FlatHits():
         # and starts from zero
         self.hit_index = "hit_index"
         self.event_index = "event_index"
+
+        # Record how many entries to load at once
+        self._num_entries = num_entries
 
         # The selection controls which hits are imported
         self.selection = selection
@@ -138,7 +142,7 @@ class FlatHits():
         return self.data.columns.values
 
     def _import_root_file(self, path, tree, branches, selection=None,
-                          single_perc=True, num_entires=None):
+                          single_perc=True, num_entries=None):
         """
 
         :param path: path to root file
@@ -159,10 +163,13 @@ class FlatHits():
         # Allow for custom selections
         if selection is None:
             selection = self.selection
+        # Check if num_entries is set, if not, use class default
+        if num_entries is None:
+            num_entries = self._num_entries
         # Import the branches
         data = import_uproot_selected(path, tree, branches,
                                       selection=selection,
-                                      num_entries=num_entires,
+                                      num_entries=num_entries,
                                       single_perc=single_perc)
         # Return the data frame
         return data
@@ -287,16 +294,16 @@ class FlatHits():
         """
         # Default is all true
         mask = np.ones(len(these_hits))
-        if not values is None:
+        if values is not None:
             # Switch to a list if a single value is given
             if not _is_sequence(values):
                 values = [values]
             this_mask = these_hits[variable].isin(values)
             mask = np.logical_and(mask, this_mask)
-        if not greater_than is None:
+        if greater_than is not None:
             this_mask = these_hits[variable] > greater_than
             mask = np.logical_and(mask, this_mask)
-        if not less_than is None:
+        if less_than is not None:
             this_mask = these_hits[variable] < less_than
             mask = np.logical_and(mask, this_mask)
         if invert:
@@ -502,14 +509,16 @@ class GeomHits(FlatHits):
         self.time_name = prefix + time_name
         branches += [self.edep_name, self.time_name]
         # Check if there are any cuts on time
-        for time_val, oper in zip([min_time, max_time],
-                                  [">=", "<="]):
-            if time_val is not None:
-                time_cut = "{} {} {}".format(self.time_name, oper, time_val)
-                if selection is not None: 
-                    selection += " && " + time_cut
-                else:
-                    selection = time_cut
+        # TODO fix this, it is broken and returns a bad key for CTH events 
+        # (missing events maybe)
+        #for time_val, oper in zip([min_time, max_time],
+        #                          [">=", "<="]):
+        #    if time_val is not None:
+        #        time_cut = "{} {} {}".format(self.time_name, oper, time_val)
+        #        if selection is not None: 
+        #            selection += " && " + time_cut
+        #        else:
+        #            selection = time_cut
         # Define the flattened indexes of the geometry
         self.flat_name = prefix + flat_name
         # Get the geometry of the detector
@@ -519,6 +528,11 @@ class GeomHits(FlatHits):
                           selection=selection,
                           branches=branches, 
                           **kwargs)
+        # TODO remove this once the selection is fixed
+        if (min_time is not None) or (max_time is not None):
+            self.keep_hits_where(self.time_name, 
+                                 greater_than=min_time,
+                                 less_than=max_time)
 
     def set_layer_info(self, row_name="Layer"):
         """
@@ -662,9 +676,8 @@ class CDCHits(GeomHits):
         agg_dict[self.hit_type_name] = 'any'
         # Group by the channels
         group_list = [self.event_index, self.flat_name]
-        grp_data = self.data.groupby(group_list, sort=False)
         # Aggregate the data and reset the indexes
-        self.data = grp_data.agg(agg_dict)
+        self.data = self.data.groupby(group_list, sort=False).agg(agg_dict)
         self.data.reset_index(level=group_list[1:], drop=True, inplace=True)
         # Sort the hits by time again
         self.sort_hits(self.time_name)
@@ -1156,9 +1169,8 @@ class CyDetHits():
                  cth_branches=None,
                  cth_min_time=None,
                  cth_max_time=None,
-                 evt_number="EventNumber",
-                 hit_number="HitNumber",
                  remove_coincidence=True,
+                 rebin_time=True,
                  **kwargs):
         """
         FIXME
@@ -1172,8 +1184,9 @@ class CyDetHits():
                            first_event=cdc_first_event,
                            n_events=cdc_n_events,
                            branches=cdc_branches,
-                           evt_number=evt_number,
-                           hit_number=hit_number,
+                           min_time=cdc_min_time,
+                           max_time=cdc_max_time,
+                           drift_time=cdc_drift_time,
                            **kwargs)
         # Now import the CTH sample, only importing the events that are already
         # in the CDC sample
@@ -1193,8 +1206,8 @@ class CyDetHits():
                            prefix=cth_prefix,
                            selection=cth_selection,
                            branches=cth_branches,
-                           evt_number=evt_number,
-                           hit_number=hit_number,
+                           min_time=cth_min_time,
+                           max_time=cth_max_time,
                            **kwargs)
         # Set the members
         self.cdc = cdc_hits
@@ -1203,6 +1216,8 @@ class CyDetHits():
         if remove_coincidence:
             # Remove the cdc coincidence
             cdc_hits.remove_coincidence()
+        # Check if time should be rebinned
+        if rebin_time:
             # Rebin the cth hits in time
             cth_hits.rebin_time()
         # Set the event information
